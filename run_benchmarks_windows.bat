@@ -221,7 +221,7 @@ echo.
 echo Step 5: Installing remaining dependencies...
 
 REM Install benchmark dependencies
-uv pip install numpy psutil tabulate nvidia-ml-py3 > "%TEMP_OUTPUT%" 2>&1
+uv pip install numpy psutil tabulate nvidia-ml-py3 pytest pytest-asyncio > "%TEMP_OUTPUT%" 2>&1
 type "%TEMP_OUTPUT%"
 type "%TEMP_OUTPUT%" >> "%OUTPUT_FILE%"
 
