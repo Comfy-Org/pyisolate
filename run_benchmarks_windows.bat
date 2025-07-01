@@ -314,8 +314,42 @@ echo NOTE: This test intentionally pushes VRAM limits to find maximum capacity
 
 REM Run memory benchmark
 REM Memory benchmarks take longer due to multiple extension creation
-echo Starting memory benchmark...
-echo NOTE: Press Ctrl+C if the benchmark appears stuck (Windows CUDA multiprocessing can hang)
+
+REM Calculate the time 15 minutes from now
+for /f "tokens=1-3 delims=:." %%a in ("%time%") do (
+    set /a "hours=%%a"
+    set /a "minutes=%%b"
+    set /a "seconds=%%c"
+)
+
+REM Add 15 minutes
+set /a "minutes+=15"
+if !minutes! GEQ 60 (
+    set /a "hours+=1"
+    set /a "minutes-=60"
+)
+if !hours! GEQ 24 (
+    set /a "hours-=24"
+)
+
+REM Format the time nicely
+if !hours! LSS 10 set "hours=0!hours!"
+if !minutes! LSS 10 set "minutes=0!minutes!"
+
+REM Determine AM/PM
+set "ampm=AM"
+set /a "display_hours=!hours!"
+if !hours! GEQ 12 (
+    set "ampm=PM"
+    if !hours! GTR 12 (
+        set /a "display_hours=!hours!-12"
+    )
+)
+if !display_hours! EQU 0 set "display_hours=12"
+
+echo Starting memory benchmark at %time%...
+echo NOTE: Press Ctrl+C if nothing has changed in at least 15 minutes (at !display_hours!:!minutes! !ampm!)
+echo The test intentionally pushes VRAM limits and may appear frozen when it hits limits.
 start /B /WAIT python memory_benchmark.py --counts 1,2,5,10 --test-both-modes > "%TEMP_OUTPUT%" 2>&1
 set MEMORY_RESULT=!ERRORLEVEL!
 
