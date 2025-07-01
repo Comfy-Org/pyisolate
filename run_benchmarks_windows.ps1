@@ -223,7 +223,7 @@ Write-Host "NOTE: Press Ctrl+C if nothing has changed in at least 15 minutes (at
 Write-Host "The test intentionally pushes VRAM limits and may appear frozen when it hits limits."
 
 # Run memory benchmark
-$output = & python memory_benchmark.py --counts 1,2,5,10 --test-both-modes 2>&1 | Out-String
+$output = & python memory_benchmark.py --counts 1,2,5,10,20,50 2>&1 | Out-String
 $memoryResult = $LASTEXITCODE
 $output | Tee-Object -Append "..\$OutputFile"
 

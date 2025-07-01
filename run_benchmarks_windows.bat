@@ -324,62 +324,100 @@ echo NOTE: This test intentionally pushes VRAM limits to find maximum capacity
 REM Run memory benchmark
 REM Memory benchmarks take longer due to multiple extension creation
 
-REM Calculate the time 15 minutes from now
-for /f "tokens=1-3 delims=:." %%a in ("%time%") do (
-    set /a "hours=%%a"
-    set /a "minutes=%%b"
-    set /a "seconds=%%c"
-)
+REM First, let's make sure we're in the benchmarks directory before running
+REM and calculate the timeout time right before we need it
 
-REM Add 15 minutes
-set /a "minutes+=15"
-if !minutes! GEQ 60 (
-    set /a "hours+=1"
-    set /a "minutes-=60"
-)
-if !hours! GEQ 24 (
-    set /a "hours-=24"
-)
+echo Starting memory benchmark preparation...
 
-REM Format the time nicely
-if !hours! LSS 10 set "hours=0!hours!"
-if !minutes! LSS 10 set "minutes=0!minutes!"
+REM Run the memory benchmark with real-time output
+REM Using a different approach to avoid buffering issues
+(
+    echo.
+    echo ================================================================
+    echo STARTING MEMORY BENCHMARK
+    echo ================================================================
 
-REM Determine AM/PM
-set "ampm=AM"
-set /a "display_hours=!hours!"
-if !hours! GEQ 12 (
-    set "ampm=PM"
-    if !hours! GTR 12 (
-        set /a "display_hours=!hours!-12"
+    REM Calculate timeout time right before running
+    for /f "tokens=1-3 delims=:." %%a in ("!time!") do (
+        set /a "hours=%%a"
+        set /a "minutes=%%b"
     )
-)
-if !display_hours! EQU 0 set "display_hours=12"
 
-echo Starting memory benchmark at %time%...
-echo NOTE: Press Ctrl+C if nothing has changed in at least 15 minutes (at !display_hours!:!minutes! !ampm!)
-echo The test intentionally pushes VRAM limits and may appear frozen when it hits limits.
-python memory_benchmark.py --counts 1,2,5,10 --test-both-modes > "%TEMP_OUTPUT%" 2>&1
+    REM Add 15 minutes
+    set /a "minutes+=15"
+    if !minutes! GEQ 60 (
+        set /a "hours+=1"
+        set /a "minutes-=60"
+    )
+    if !hours! GEQ 24 set /a "hours-=24"
+
+    REM Format for display
+    if !hours! LSS 10 set "hours=0!hours!"
+    if !minutes! LSS 10 set "minutes=0!minutes!"
+
+    REM AM/PM
+    set "ampm=AM"
+    set /a "display_hours=!hours!"
+    if !hours! GEQ 12 (
+        set "ampm=PM"
+        if !hours! GTR 12 set /a "display_hours=!hours!-12"
+    )
+    if !display_hours! EQU 0 set "display_hours=12"
+
+    echo Current time: !time!
+    echo If nothing changes by !display_hours!:!minutes! !ampm!, press Ctrl+C
+    echo.
+    echo The test intentionally pushes VRAM limits to find maximum capacity.
+    echo CUDA out-of-memory errors are EXPECTED and part of the testing.
+    echo.
+) >> "..\%OUTPUT_FILE%"
+
+REM Display the message to console too
+echo.
+echo ================================================================
+echo STARTING MEMORY BENCHMARK
+echo ================================================================
+for /f "tokens=1-3 delims=:." %%a in ("!time!") do (
+    set /a "calc_hours=%%a"
+    set /a "calc_minutes=%%b"
+)
+set /a "calc_minutes+=15"
+if !calc_minutes! GEQ 60 (
+    set /a "calc_hours+=1"
+    set /a "calc_minutes-=60"
+)
+if !calc_hours! GEQ 24 set /a "calc_hours-=24"
+if !calc_hours! LSS 10 set "calc_hours=0!calc_hours!"
+if !calc_minutes! LSS 10 set "calc_minutes=0!calc_minutes!"
+set "calc_ampm=AM"
+set /a "calc_display_hours=!calc_hours!"
+if !calc_hours! GEQ 12 (
+    set "calc_ampm=PM"
+    if !calc_hours! GTR 12 set /a "calc_display_hours=!calc_hours!-12"
+)
+if !calc_display_hours! EQU 0 set "calc_display_hours=12"
+
+echo Current time: !time!
+echo If nothing changes by !calc_display_hours!:!calc_minutes! !calc_ampm!, press Ctrl+C
+echo.
+echo The test intentionally pushes VRAM limits to find maximum capacity.
+echo CUDA out-of-memory errors are EXPECTED and part of the testing.
+echo.
+
+REM Now run the actual benchmark - without output redirection first to see if that helps
+echo Running: python memory_benchmark.py --counts 1,2,5,10,20,50
+echo.
+python memory_benchmark.py --counts 1,2,5,10,20,50
 set MEMORY_RESULT=!ERRORLEVEL!
 
-REM Display and save the output
-if exist "%TEMP_OUTPUT%" (
-    type "%TEMP_OUTPUT%"
-    type "%TEMP_OUTPUT%" >> "..\%OUTPUT_FILE%"
-)
-
-if %MEMORY_RESULT% EQU -1 (
-    echo.
-    echo WARNING: Memory benchmark timed out after 20 minutes
-    echo This may indicate CUDA multiprocessing issues on Windows
-    echo Partial results have been saved
-    echo.
-    echo [%date% %time%] WARNING: Memory benchmark timed out >> "..\%OUTPUT_FILE%"
-) else if %MEMORY_RESULT% NEQ 0 (
+if %MEMORY_RESULT% NEQ 0 (
     echo.
     echo WARNING: Memory benchmark failed or was interrupted
     echo [%date% %time%] WARNING: Memory benchmark failed >> "..\%OUTPUT_FILE%"
     echo Error code: %MEMORY_RESULT% >> "..\%OUTPUT_FILE%"
+    echo.
+    echo NOTE: Output was displayed in real-time above.
+    echo If the test appeared stuck, it may be due to Windows CUDA multiprocessing issues.
 )
 
 cd ..
