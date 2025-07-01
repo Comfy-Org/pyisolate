@@ -13,6 +13,7 @@ import platform
 import sys
 import time
 from pathlib import Path
+from typing import Optional
 
 import psutil
 
@@ -78,6 +79,69 @@ class MemoryTracker:
                 print(f"Failed to initialize NVML on {self.platform}: {e}")
                 self.nvml_initialized = False
 
+        # Try to get baseline GPU memory using nvidia-smi as fallback on Windows
+        if not self.nvml_initialized and self.platform == "Windows":
+            baseline = self._get_gpu_memory_nvidia_smi()
+            if baseline is not None:
+                self.baseline_gpu_memory_mb = baseline
+                print(f"Using nvidia-smi fallback. Initial GPU memory: {baseline:.1f} MB")
+
+    def _get_gpu_memory_nvidia_smi(self) -> Optional[float]:
+        """Get GPU memory usage using nvidia-smi command (Windows fallback)."""
+        try:
+            import shutil
+            import subprocess
+
+            # Find nvidia-smi executable
+            nvidia_smi = shutil.which("nvidia-smi")
+            if not nvidia_smi:
+                return None
+
+            # Query GPU memory usage via nvidia-smi
+            result = subprocess.run(  # noqa: S603
+                [nvidia_smi, "--query-gpu=memory.used", "--format=csv,nounits,noheader"],
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            # Parse the output (in MB)
+            used_mb = float(result.stdout.strip())
+            return used_mb
+        except Exception:
+            return None
+
+    def _get_gpu_memory_windows_fallback(self, memory_info: dict[str, float]) -> dict[str, float]:
+        """Fallback method to get GPU memory on Windows using nvidia-smi."""
+        current_used = self._get_gpu_memory_nvidia_smi()
+        if current_used is not None:
+            memory_info["gpu_used_mb"] = current_used
+            memory_info["total_vram_mb"] = current_used
+
+            # Calculate delta from baseline
+            vram_delta = current_used - self.baseline_gpu_memory_mb
+            memory_info["host_vram_mb"] = max(0, vram_delta)
+
+            # Try to get total GPU memory
+            try:
+                import shutil
+                import subprocess
+
+                nvidia_smi = shutil.which("nvidia-smi")
+                if nvidia_smi:
+                    result = subprocess.run(  # noqa: S603
+                        [nvidia_smi, "--query-gpu=memory.total", "--format=csv,nounits,noheader"],
+                        capture_output=True,
+                        text=True,
+                        check=True,
+                    )
+                    memory_info["gpu_total_mb"] = float(result.stdout.strip())
+            except Exception as e:
+                # Log the error for debugging but continue
+                if self.platform == "Windows":
+                    print(f"Could not get total GPU memory via nvidia-smi: {e}", file=sys.stderr)
+
+        return memory_info
+
     def get_process_tree_pids(self) -> list[int]:
         """Get all PIDs in the process tree (including children)."""
         pids = [self.process.pid]
@@ -137,20 +201,17 @@ class MemoryTracker:
                 # This is more reliable than per-process tracking, especially on Windows
                 vram_delta = current_used_mb - self.baseline_gpu_memory_mb
                 memory_info["host_vram_mb"] = max(0, vram_delta)
-
-                # Debug output for Windows
-                if self.platform == "Windows":
-                    print(
-                        f"[DEBUG Windows] Current GPU: {current_used_mb:.1f} MB, "
-                        f"Baseline: {self.baseline_gpu_memory_mb:.1f} MB, "
-                        f"Delta: {vram_delta:.1f} MB",
-                        file=sys.stderr,
-                    )
-
             except Exception as e:
-                print(f"Error getting GPU memory usage: {e}")
+                print(f"Error getting GPU memory usage via NVML: {e}")
+                if self.platform == "Windows":
+                    # Try alternative method for Windows
+                    memory_info = self._get_gpu_memory_windows_fallback(memory_info)
 
-        # Fallback: try PyTorch CUDA memory for current process if NVML failed
+        # Fallback: Try Windows nvidia-smi if NVML not initialized
+        elif not self.nvml_initialized and self.platform == "Windows":
+            memory_info = self._get_gpu_memory_windows_fallback(memory_info)
+
+        # Fallback: try PyTorch CUDA memory for current process if all else failed
         elif CUDA_AVAILABLE and torch.cuda.is_available():
             try:
                 # This only captures current process, but better than nothing
