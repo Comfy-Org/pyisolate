@@ -151,3 +151,6 @@ cython_debug/
 
 # Benchmark virtual environment
 .benchmark_venv/
+
+# UV cache directory (for hardlinking optimization)
+.uv_cache/
