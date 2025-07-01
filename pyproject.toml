@@ -40,6 +40,7 @@ dev = [
 ]
 test = [
     "torch>=2.0.0",  # For testing share_torch functionality
+    "psutil>=5.9.0",  # For memory monitoring
     "numpy>=1.26.0,<2.0.0",  # For testing share_torch functionality
     "pyyaml>=5.4.0",  # For test manifest creation
 ]
