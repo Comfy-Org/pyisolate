@@ -13,6 +13,11 @@ echo   4. Install remaining dependencies
 echo   5. Run performance and memory benchmarks
 echo   6. Collect all results in a single file
 echo.
+echo NOTE: If this script freezes during benchmarks, try the PowerShell
+echo       version instead: run_benchmarks_windows.ps1
+echo       To enable PowerShell scripts, run this command first:
+echo       powershell -Command "Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope CurrentUser"
+echo.
 echo ================================================================
 echo.
 
@@ -140,6 +145,11 @@ if %ERRORLEVEL% NEQ 0 (
     exit /b 1
 )
 echo Virtual environment activated: OK
+
+REM Set environment variables that might help with multiprocessing
+set PYTHONUNBUFFERED=1
+set CUDA_LAUNCH_BLOCKING=1
+echo Set PYTHONUNBUFFERED=1 and CUDA_LAUNCH_BLOCKING=1 for better error handling
 
 REM Step 4: Detect CUDA and install PyTorch appropriately
 echo.
@@ -272,10 +282,9 @@ if %ERRORLEVEL% NEQ 0 (
 echo Running benchmark.py (this may take several minutes)...
 echo Output is being saved to the results file...
 
-REM Run benchmark with output capture
-REM Note: Windows doesn't have a built-in timeout for console apps, but we can use start /wait
+REM Run benchmark directly without start command
 echo Starting performance benchmark...
-start /B /WAIT python benchmark.py --quick > "%TEMP_OUTPUT%" 2>&1
+python benchmark.py --quick > "%TEMP_OUTPUT%" 2>&1
 set BENCHMARK_RESULT=!ERRORLEVEL!
 
 REM Display and save the output
@@ -350,7 +359,7 @@ if !display_hours! EQU 0 set "display_hours=12"
 echo Starting memory benchmark at %time%...
 echo NOTE: Press Ctrl+C if nothing has changed in at least 15 minutes (at !display_hours!:!minutes! !ampm!)
 echo The test intentionally pushes VRAM limits and may appear frozen when it hits limits.
-start /B /WAIT python memory_benchmark.py --counts 1,2,5,10 --test-both-modes > "%TEMP_OUTPUT%" 2>&1
+python memory_benchmark.py --counts 1,2,5,10 --test-both-modes > "%TEMP_OUTPUT%" 2>&1
 set MEMORY_RESULT=!ERRORLEVEL!
 
 REM Display and save the output
