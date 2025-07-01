@@ -339,7 +339,7 @@ class Extension(Generic[T]):
             import torch
 
             torch_version = torch.__version__
-            if os.name == "nt" and torch_version.endswith("+cpu"):
+            if torch_version.endswith("+cpu"):
                 # On Windows, the '+cpu' is not included in the version string
                 torch_version = torch_version[:-4]  # Remove the '+cpu' suffix
             cuda_version = torch.version.cuda  # type: ignore
