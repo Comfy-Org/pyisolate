@@ -52,6 +52,27 @@ from pyisolate import ExtensionConfig, ExtensionManager, ExtensionManagerConfig
 from tests.test_integration import IntegrationTestBase
 
 
+# 1. Device detection helpers (add after imports)
+def detect_available_backends():
+    import torch
+    backends = ["cpu"]
+    cuda_available = torch.cuda.is_available()
+    xpu_available = hasattr(torch, "xpu") and torch.xpu.is_available()
+    rocm_available = False
+    if cuda_available:
+        torch_version = getattr(torch, 'version', None)
+        hip_version = getattr(torch_version, 'hip', None) if torch_version else None
+        if hip_version is not None:
+            rocm_available = True
+    if cuda_available and not rocm_available:
+        backends.append("cuda")
+    if rocm_available:
+        backends.append("rocm")
+    if xpu_available:
+        backends.append("xpu")
+    return backends
+
+
 class MemoryTracker:
     """Tracks memory usage across host and child processes."""
 
@@ -64,13 +85,13 @@ class MemoryTracker:
 
         if NVML_AVAILABLE and nvml:
             try:
-                nvml.nvmlInit()
+                nvml.nvmlInit()  # type: ignore[attr-defined]
                 self.nvml_initialized = True
                 # Get the first GPU
-                self.gpu_handle = nvml.nvmlDeviceGetHandleByIndex(0)
+                self.gpu_handle = nvml.nvmlDeviceGetHandleByIndex(0)  # type: ignore[attr-defined]
                 # Store baseline GPU memory usage
-                mem_info = nvml.nvmlDeviceGetMemoryInfo(self.gpu_handle)
-                self.baseline_gpu_memory_mb = mem_info.used / 1024 / 1024
+                mem_info = nvml.nvmlDeviceGetMemoryInfo(self.gpu_handle) if nvml is not None else None  # type: ignore[attr-defined]
+                self.baseline_gpu_memory_mb = (mem_info.used / 1024 / 1024) if mem_info is not None else 0
                 print(
                     f"NVML initialized on {self.platform}. "
                     f"Initial GPU memory: {self.baseline_gpu_memory_mb:.1f} MB"
@@ -114,12 +135,12 @@ class MemoryTracker:
         """Fallback method to get GPU memory on Windows using nvidia-smi."""
         current_used = self._get_gpu_memory_nvidia_smi()
         if current_used is not None:
-            memory_info["gpu_used_mb"] = current_used
-            memory_info["total_vram_mb"] = current_used
+            memory_info["gpu_used_mb"] = float(current_used)
+            memory_info["total_vram_mb"] = float(current_used)
 
             # Calculate delta from baseline
-            vram_delta = current_used - self.baseline_gpu_memory_mb
-            memory_info["host_vram_mb"] = max(0, vram_delta)
+            vram_delta = float(current_used) - float(self.baseline_gpu_memory_mb)
+            memory_info["host_vram_mb"] = float(max(0.0, vram_delta))
 
             # Try to get total GPU memory
             try:
@@ -155,52 +176,54 @@ class MemoryTracker:
     def get_memory_usage(self) -> dict[str, float]:
         """Get current memory usage for host and all child processes."""
         memory_info = {
-            "host_ram_mb": 0,
-            "children_ram_mb": 0,
-            "total_ram_mb": 0,
-            "host_vram_mb": 0,
-            "total_vram_mb": 0,
-            "gpu_used_mb": 0,
-            "gpu_total_mb": 0,
-            "num_processes": 1,
+            "host_ram_mb": 0.0,
+            "children_ram_mb": 0.0,
+            "total_ram_mb": 0.0,
+            "host_vram_mb": 0.0,
+            "total_vram_mb": 0.0,
+            "gpu_used_mb": 0.0,
+            "gpu_total_mb": 0.0,
+            "num_processes": 1.0,  # float for type consistency
         }
 
         # Get RAM usage
         try:
             # Host process
             host_info = self.process.memory_info()
-            memory_info["host_ram_mb"] = host_info.rss / 1024 / 1024
+            memory_info["host_ram_mb"] = (host_info.rss or 0) / 1024 / 1024
 
             # Child processes
             children = self.process.children(recursive=True)
-            memory_info["num_processes"] = 1 + len(children)
+            memory_info["num_processes"] = 1.0 + len(children)
 
             for child in children:
                 try:
                     child_info = child.memory_info()
-                    memory_info["children_ram_mb"] += child_info.rss / 1024 / 1024
+                    memory_info["children_ram_mb"] += (child_info.rss or 0) / 1024 / 1024
                 except psutil.NoSuchProcess:
                     pass
 
-            memory_info["total_ram_mb"] = memory_info["host_ram_mb"] + memory_info["children_ram_mb"]
+            memory_info["total_ram_mb"] = (
+                (memory_info["host_ram_mb"] or 0)
+                + (memory_info["children_ram_mb"] or 0)
+            )
 
         except Exception as e:
             print(f"Error getting RAM usage: {e}")
 
         # Get GPU memory usage - use total system VRAM since extensions run in separate processes
-        if self.nvml_initialized and self.gpu_handle:
+        if self.nvml_initialized and self.gpu_handle and nvml is not None:
             try:
                 # Get total GPU memory info
-                mem_info = nvml.nvmlDeviceGetMemoryInfo(self.gpu_handle)
-                current_used_mb = mem_info.used / 1024 / 1024
+                mem_info = nvml.nvmlDeviceGetMemoryInfo(self.gpu_handle)  # type: ignore[attr-defined]
+                current_used_mb = float(mem_info.used or 0) / 1024 / 1024 if mem_info else 0
                 memory_info["gpu_used_mb"] = current_used_mb
-                memory_info["gpu_total_mb"] = mem_info.total / 1024 / 1024
+                memory_info["gpu_total_mb"] = float(mem_info.total or 0) / 1024 / 1024 if mem_info else 0
                 memory_info["total_vram_mb"] = current_used_mb
 
                 # Calculate VRAM usage relative to baseline (captures all processes)
-                # This is more reliable than per-process tracking, especially on Windows
-                vram_delta = current_used_mb - self.baseline_gpu_memory_mb
-                memory_info["host_vram_mb"] = max(0, vram_delta)
+                vram_delta = current_used_mb - (self.baseline_gpu_memory_mb or 0)
+                memory_info["host_vram_mb"] = max(0.0, vram_delta)
             except Exception as e:
                 print(f"Error getting GPU memory usage via NVML: {e}")
                 if self.platform == "Windows":
@@ -235,11 +258,11 @@ class MemoryTracker:
 
     def reset_baseline(self):
         """Reset the baseline GPU memory measurement."""
-        if self.nvml_initialized and self.gpu_handle:
+        if self.nvml_initialized and self.gpu_handle and nvml is not None:
             try:
-                mem_info = nvml.nvmlDeviceGetMemoryInfo(self.gpu_handle)
+                mem_info = nvml.nvmlDeviceGetMemoryInfo(self.gpu_handle)  # type: ignore[attr-defined]
                 old_baseline = self.baseline_gpu_memory_mb
-                self.baseline_gpu_memory_mb = mem_info.used / 1024 / 1024
+                self.baseline_gpu_memory_mb = float(mem_info.used or 0) / 1024 / 1024 if mem_info else 0
                 print(
                     f"[DEBUG {self.platform}] Reset baseline from {old_baseline:.1f} MB "
                     f"to {self.baseline_gpu_memory_mb:.1f} MB",
@@ -250,9 +273,9 @@ class MemoryTracker:
 
     def __del__(self):
         """Cleanup NVML on deletion."""
-        if self.nvml_initialized:
+        if self.nvml_initialized and nvml is not None:
             with contextlib.suppress(Exception):
-                nvml.nvmlShutdown()
+                nvml.nvmlShutdown()  # type: ignore[attr-defined]
 
 
 async def create_memory_benchmark_extension() -> str:
@@ -333,6 +356,11 @@ class MemoryBenchmarkRunner:
 
     def __init__(self, test_base: IntegrationTestBase):
         self.test_base = test_base
+        if self.test_base.test_root is None:
+            raise RuntimeError(
+                "test_root is not set on test_base. "
+                "Did you await setup_test_environment() successfully?"
+            )
         self.memory_tracker = MemoryTracker()
         self.results = []
 
@@ -348,12 +376,25 @@ class MemoryBenchmarkRunner:
 
         baseline = self.memory_tracker.get_memory_usage()
         print(f"Baseline: {baseline['total_ram_mb']:.1f} MB RAM, {baseline['total_vram_mb']:.1f} MB VRAM")
-        if baseline["gpu_total_mb"] > 0:
-            gpu_pct = (baseline["gpu_used_mb"] / baseline["gpu_total_mb"]) * 100
+        # Print GPU memory usage if available
+        gpu_total = baseline.get("gpu_total_mb", 0.0)
+        gpu_used = baseline.get("gpu_used_mb", 0.0)
+        try:
+            gpu_total = float(gpu_total) if gpu_total not in (None, 0) else 0.0
+        except Exception:
+            gpu_total = 0.0
+        try:
+            gpu_used = float(gpu_used) if gpu_used is not None else 0.0
+        except Exception:
+            gpu_used = 0.0
+        if gpu_total > 0:
+            gpu_pct = (gpu_used / gpu_total) * 100 if gpu_total else 0
             print(
-                f"GPU Memory: {baseline['gpu_used_mb']:.1f} / "
-                f"{baseline['gpu_total_mb']:.1f} MB ({gpu_pct:.1f}% used)"
+                f"GPU Memory: {gpu_used:.1f} / "
+                f"{gpu_total:.1f} MB ({gpu_pct:.1f}% used)"
             )
+        else:
+            print("GPU Memory: N/A")
         return baseline
 
     async def run_scaling_test(
@@ -361,22 +402,28 @@ class MemoryBenchmarkRunner:
         num_extensions_list: list[int],
         share_torch: bool = True,
         test_tensor_size: tuple[int, ...] = (512, 512),
-        use_cuda: bool = False,
+        device: str = "cpu",
     ) -> list[dict]:
         """Test memory scaling with different numbers of extensions."""
+        import torch
         results = []
         extension_code = await create_memory_benchmark_extension()
 
         for num_extensions in num_extensions_list:
             print(f"\n{'=' * 60}")
-            print(f"Testing with {num_extensions} extensions (share_torch={share_torch})")
+            print(f"Testing with {num_extensions} extensions (share_torch={share_torch}, device={device})")
             print("=" * 60)
 
             # Create extensions
             extensions = []
+            extension_venv_root = getattr(self.test_base, "test_root", None)
+            if extension_venv_root is not None:
+                extension_venv_root = extension_venv_root / "extension-venvs"
+            else:
+                extension_venv_root = "extension-venvs"
             manager = ExtensionManager(
                 MemoryBenchmarkExtensionBase,
-                ExtensionManagerConfig(venv_root_path=str(self.test_base.test_root / "extension-venvs")),
+                ExtensionManagerConfig(venv_root_path=str(extension_venv_root)),
             )
 
             # Clean up and reset baseline before measuring
@@ -410,7 +457,7 @@ class MemoryBenchmarkRunner:
 
                 config = ExtensionConfig(
                     name=ext_name,
-                    module_path=str(self.test_base.test_root / "extensions" / ext_name),
+                    module_path=str((self.test_base.test_root or Path(".")) / "extensions" / ext_name),
                     isolated=True,
                     dependencies=["torch>=2.0.0"] if TORCH_AVAILABLE else [],
                     apis=[],
@@ -427,11 +474,13 @@ class MemoryBenchmarkRunner:
             after_load_memory = self.memory_tracker.get_memory_usage()
 
             # Create test tensor
-            print(f"Creating test tensor {test_tensor_size}...")
+            print(f"Creating test tensor {test_tensor_size} on {device}...")
             with torch.inference_mode():
-                if use_cuda and CUDA_AVAILABLE:
+                if device == "cuda" or device == "rocm":
                     test_tensor = torch.randn(*test_tensor_size, device="cuda")
-                    torch.cuda.synchronize()  # Ensure tensor creation completes
+                    torch.cuda.synchronize()
+                elif device == "xpu":
+                    test_tensor = torch.randn(*test_tensor_size, device="xpu")
                 else:
                     test_tensor = torch.randn(*test_tensor_size)
 
@@ -439,7 +488,7 @@ class MemoryBenchmarkRunner:
             print(f"Tensor size: {tensor_size_mb:.1f} MB on {test_tensor.device}")
 
             # Check memory after tensor creation
-            if use_cuda and CUDA_AVAILABLE:
+            if device in ("cuda", "rocm"):
                 post_tensor_memory = self.memory_tracker.get_memory_usage()
                 print(
                     f"GPU memory after tensor creation: {post_tensor_memory.get('gpu_used_mb', 0):.1f} MB "
@@ -456,7 +505,7 @@ class MemoryBenchmarkRunner:
                     if i == 0:
                         print(f"  First extension stored: {info}")
                     # Force GPU sync after each send for accurate memory tracking
-                    if use_cuda and CUDA_AVAILABLE:
+                    if device in ("cuda", "rocm"):
                         torch.cuda.synchronize()
                 except Exception as e:
                     print(f"  Failed to send to {ext_name}: {e}")
@@ -465,7 +514,7 @@ class MemoryBenchmarkRunner:
             print(f"Send completed in {send_time:.2f}s")
 
             # Force final sync before measuring
-            if use_cuda and CUDA_AVAILABLE:
+            if device in ("cuda", "rocm"):
                 torch.cuda.synchronize()
 
             # Wait for memory to settle
@@ -498,8 +547,10 @@ class MemoryBenchmarkRunner:
                 "after_send_ram_mb": after_send_memory["total_ram_mb"],
                 "load_ram_delta_mb": after_load_memory["total_ram_mb"] - before_memory["total_ram_mb"],
                 "send_ram_delta_mb": after_send_memory["total_ram_mb"] - after_load_memory["total_ram_mb"],
-                "ram_per_extension_mb": (after_load_memory["total_ram_mb"] - before_memory["total_ram_mb"])
-                / num_extensions,
+                "ram_per_extension_mb": (
+                    float(after_load_memory["total_ram_mb"] or 0)
+                    - float(before_memory["total_ram_mb"] or 0)
+                ) / num_extensions if num_extensions else 0,
                 "before_vram_mb": before_memory["total_vram_mb"],
                 "after_load_vram_mb": after_load_memory["total_vram_mb"],
                 "after_send_vram_mb": after_send_memory["total_vram_mb"],
@@ -531,7 +582,7 @@ class MemoryBenchmarkRunner:
             print(f"  Baseline: {self.memory_tracker.baseline_gpu_memory_mb:.1f} MB")
 
             # Show GPU memory if this is a GPU test
-            if use_cuda and result["load_gpu_delta_mb"] > 0:
+            if device in ("cuda", "rocm") and result["load_gpu_delta_mb"] > 0:
                 print(f"  GPU memory for tensor creation: {result['load_gpu_delta_mb']:.1f} MB")
                 print(f"  GPU memory for tensor transfer: {result['send_gpu_delta_mb']:.1f} MB")
             else:
@@ -545,7 +596,7 @@ class MemoryBenchmarkRunner:
             manager.stop_all_extensions()
             del test_tensor
             gc.collect()
-            if CUDA_AVAILABLE:
+            if device in ("cuda", "rocm"):
                 torch.cuda.empty_cache()
                 torch.cuda.synchronize()
 
@@ -555,141 +606,164 @@ class MemoryBenchmarkRunner:
         return results
 
     async def run_large_tensor_sharing_test(
-        self, num_extensions: int = 50, tensor_gb: float = 2.0, test_both_modes: bool = False
+        self,
+        num_extensions: int = 50,
+        tensor_gb: float = 2.0,
+        test_both_modes: bool = False,
+        device: str = "cpu",
     ) -> dict:
         """Test memory sharing with a large tensor across multiple extensions."""
+        import torch
         print(f"\n{'=' * 60}")
-        print(f"Large Tensor Sharing Test ({tensor_gb}GB tensor, {num_extensions} extensions)")
+        print(
+            f"Large Tensor Sharing Test ({tensor_gb}GB tensor, "
+            f"{num_extensions} extensions, device={device})"
+        )
         print("=" * 60)
 
         extension_code = await create_memory_benchmark_extension()
         results = {}
 
         # Test both CPU and GPU tensors
-        for use_cuda in [False, True]:
-            if use_cuda and not CUDA_AVAILABLE:
-                continue
+        device_name = device.upper()
+        results[device_name.lower()] = {}
+        share_torch_modes = [False, True] if test_both_modes else [True]
+        for share_torch in share_torch_modes:
+            print(f"\n--- Testing {device_name} with share_torch={share_torch} ---")
 
-            device_name = "GPU" if use_cuda else "CPU"
-            print(f"\n{'=' * 50}")
-            print(f"Testing {device_name} Tensors")
-            print("=" * 50)
+            # Create extensions
+            extensions = []
+            extension_venv_root = getattr(self.test_base, "test_root", None)
+            if extension_venv_root is not None:
+                extension_venv_root = extension_venv_root / "extension-venvs"
+            else:
+                extension_venv_root = "extension-venvs"
+            manager = ExtensionManager(
+                MemoryBenchmarkExtensionBase,
+                ExtensionManagerConfig(venv_root_path=str(extension_venv_root)),
+            )
 
-            results[device_name.lower()] = {}
+            # Measure baseline
+            gc.collect()
+            if CUDA_AVAILABLE:
+                torch.cuda.empty_cache()
+            baseline = self.memory_tracker.get_memory_usage()
 
-            # Test only with share_torch=True by default
-            share_torch_modes = [False, True] if test_both_modes else [True]
-            for share_torch in share_torch_modes:
-                print(f"\n--- Testing {device_name} with share_torch={share_torch} ---")
-
-                # Create extensions
-                extensions = []
-                manager = ExtensionManager(
-                    MemoryBenchmarkExtensionBase,
-                    ExtensionManagerConfig(venv_root_path=str(self.test_base.test_root / "extension-venvs")),
+            # Create extensions
+            for i in range(num_extensions):
+                ext_name = f"large_test_ext_{device_name.lower()}_{i}"
+                self.test_base.create_extension(
+                    ext_name,
+                    dependencies=["torch>=2.0.0"],
+                    share_torch=share_torch,
+                    extension_code=extension_code,
                 )
 
-                # Measure baseline
-                gc.collect()
-                if CUDA_AVAILABLE:
-                    torch.cuda.empty_cache()
-                baseline = self.memory_tracker.get_memory_usage()
+                config = ExtensionConfig(
+                    name=ext_name,
+                    module_path=str((self.test_base.test_root or Path(".")) / "extensions" / ext_name),
+                    isolated=True,
+                    dependencies=["torch>=2.0.0"],
+                    apis=[],
+                    share_torch=share_torch,
+                )
 
-                # Create extensions
-                for i in range(num_extensions):
-                    ext_name = f"large_test_ext_{device_name.lower()}_{i}"
-                    self.test_base.create_extension(
-                        ext_name,
-                        dependencies=["torch>=2.0.0"],
-                        share_torch=share_torch,
-                        extension_code=extension_code,
-                    )
+                ext = manager.load_extension(config)
+                extensions.append((ext_name, ext))
 
-                    config = ExtensionConfig(
-                        name=ext_name,
-                        module_path=str(self.test_base.test_root / "extensions" / ext_name),
-                        isolated=True,
-                        dependencies=["torch>=2.0.0"],
-                        apis=[],
-                        share_torch=share_torch,
-                    )
+            # Wait for extensions to initialize
+            await asyncio.sleep(2)
 
-                    ext = manager.load_extension(config)
-                    extensions.append((ext_name, ext))
+            # Create large tensor
+            # Calculate size for desired GB (float32 = 4 bytes per element)
+            num_elements = int(tensor_gb * 1024 * 1024 * 1024 / 4)
+            # Make it a square-ish tensor
+            side = int(num_elements**0.5)
 
-                # Wait for extensions to initialize
-                await asyncio.sleep(2)
+            print(f"Creating {tensor_gb}GB tensor ({side}x{side}) on {device_name}...")
+            with torch.inference_mode():
+                if device == "cuda" or device == "rocm":
+                    large_tensor = torch.randn(side, side, device="cuda")
+                    torch.cuda.synchronize()
+                elif device == "xpu":
+                    large_tensor = torch.randn(side, side, device="xpu")
+                else:
+                    large_tensor = torch.randn(side, side)
+            actual_size_mb = large_tensor.element_size() * large_tensor.numel() / (1024 * 1024)
+            print(f"Actual tensor size: {actual_size_mb:.1f} MB on {large_tensor.device}")
 
-                # Create large tensor
-                # Calculate size for desired GB (float32 = 4 bytes per element)
-                num_elements = int(tensor_gb * 1024 * 1024 * 1024 / 4)
-                # Make it a square-ish tensor
-                side = int(num_elements**0.5)
+            # Measure after tensor creation
+            after_create = self.memory_tracker.get_memory_usage()
 
-                print(f"Creating {tensor_gb}GB tensor ({side}x{side}) on {device_name}...")
-                with torch.inference_mode():
-                    large_tensor = (
-                        torch.randn(side, side, device="cuda") if use_cuda else torch.randn(side, side)
-                    )
-                actual_size_mb = large_tensor.element_size() * large_tensor.numel() / (1024 * 1024)
-                print(f"Actual tensor size: {actual_size_mb:.1f} MB on {large_tensor.device}")
+            # Send to all extensions
+            print(f"Sending large {device_name} tensor to {num_extensions} extensions...")
+            send_start = time.time()
 
-                # Measure after tensor creation
-                after_create = self.memory_tracker.get_memory_usage()
+            for _i, (ext_name, ext) in enumerate(extensions):
+                try:
+                    await ext.store_tensor("large_tensor", large_tensor)
+                    print(f"  Sent to {ext_name}")
+                except Exception as e:
+                    print(f"  Failed to send to {ext_name}: {e}")
 
-                # Send to all extensions
-                print(f"Sending large {device_name} tensor to {num_extensions} extensions...")
-                send_start = time.time()
+            send_time = time.time() - send_start
 
-                for _i, (ext_name, ext) in enumerate(extensions):
-                    try:
-                        await ext.store_tensor("large_tensor", large_tensor)
-                        print(f"  Sent to {ext_name}")
-                    except Exception as e:
-                        print(f"  Failed to send to {ext_name}: {e}")
+            # Measure after sending
+            await asyncio.sleep(2)
+            after_send = self.memory_tracker.get_memory_usage()
 
-                send_time = time.time() - send_start
+            # Store results
+            results[device_name.lower()][f"share_torch_{share_torch}"] = {
+                "baseline_ram_mb": baseline["total_ram_mb"],
+                "after_create_ram_mb": after_create["total_ram_mb"],
+                "after_send_ram_mb": after_send["total_ram_mb"],
+                "baseline_vram_mb": baseline["total_vram_mb"],
+                "after_create_vram_mb": after_create["total_vram_mb"],
+                "after_send_vram_mb": after_send["total_vram_mb"],
+                "tensor_size_mb": actual_size_mb,
+                "tensor_device": str(large_tensor.device),
+                "ram_for_tensor_creation_mb": (
+                    float(after_create["total_ram_mb"] or 0)
+                    - float(baseline["total_ram_mb"] or 0)
+                ) / num_extensions if num_extensions else 0,
+                "ram_for_distribution_mb": (
+                    float(after_send["total_ram_mb"] or 0)
+                    - float(after_create["total_ram_mb"] or 0)
+                ) / num_extensions if num_extensions else 0,
+                "ram_per_extension_copy_mb": (
+                    float(after_send["total_ram_mb"] or 0)
+                    - float(after_create["total_ram_mb"] or 0)
+                ) / num_extensions if num_extensions else 0,
+                "vram_for_tensor_creation_mb": (
+                    float(after_create["total_vram_mb"] or 0)
+                    - float(baseline["total_vram_mb"] or 0)
+                ) / num_extensions if num_extensions else 0,
+                "vram_for_distribution_mb": (
+                    float(after_send["total_vram_mb"] or 0)
+                    - float(after_create["total_vram_mb"] or 0)
+                ) / num_extensions if num_extensions else 0,
+                # Add GPU total memory tracking
+                "baseline_gpu_mb": baseline.get("gpu_used_mb", 0),
+                "after_create_gpu_mb": after_create.get("gpu_used_mb", 0),
+                "after_send_gpu_mb": after_send.get("gpu_used_mb", 0),
+                "gpu_for_tensor_creation_mb": (
+                    float(after_create.get("gpu_used_mb", 0) or 0)
+                    - float(baseline.get("gpu_used_mb", 0) or 0)
+                ) / num_extensions if num_extensions else 0,
+                "gpu_for_distribution_mb": (
+                    float(after_send.get("gpu_used_mb", 0) or 0)
+                    - float(after_create.get("gpu_used_mb", 0) or 0)
+                ) / num_extensions if num_extensions else 0,
+                "send_time_s": send_time,
+            }
 
-                # Measure after sending
-                await asyncio.sleep(2)
-                after_send = self.memory_tracker.get_memory_usage()
-
-                # Store results
-                results[device_name.lower()][f"share_torch_{share_torch}"] = {
-                    "baseline_ram_mb": baseline["total_ram_mb"],
-                    "after_create_ram_mb": after_create["total_ram_mb"],
-                    "after_send_ram_mb": after_send["total_ram_mb"],
-                    "baseline_vram_mb": baseline["total_vram_mb"],
-                    "after_create_vram_mb": after_create["total_vram_mb"],
-                    "after_send_vram_mb": after_send["total_vram_mb"],
-                    "tensor_size_mb": actual_size_mb,
-                    "tensor_device": str(large_tensor.device),
-                    "ram_for_tensor_creation_mb": after_create["total_ram_mb"] - baseline["total_ram_mb"],
-                    "ram_for_distribution_mb": after_send["total_ram_mb"] - after_create["total_ram_mb"],
-                    "ram_per_extension_copy_mb": (after_send["total_ram_mb"] - after_create["total_ram_mb"])
-                    / num_extensions
-                    if num_extensions > 0
-                    else 0,
-                    "vram_for_tensor_creation_mb": after_create["total_vram_mb"] - baseline["total_vram_mb"],
-                    "vram_for_distribution_mb": after_send["total_vram_mb"] - after_create["total_vram_mb"],
-                    # Add GPU total memory tracking
-                    "baseline_gpu_mb": baseline.get("gpu_used_mb", 0),
-                    "after_create_gpu_mb": after_create.get("gpu_used_mb", 0),
-                    "after_send_gpu_mb": after_send.get("gpu_used_mb", 0),
-                    "gpu_for_tensor_creation_mb": after_create.get("gpu_used_mb", 0)
-                    - baseline.get("gpu_used_mb", 0),
-                    "gpu_for_distribution_mb": after_send.get("gpu_used_mb", 0)
-                    - after_create.get("gpu_used_mb", 0),
-                    "send_time_s": send_time,
-                }
-
-                # Cleanup
-                manager.stop_all_extensions()
-                del large_tensor
-                gc.collect()
-                if CUDA_AVAILABLE:
-                    torch.cuda.empty_cache()
-                await asyncio.sleep(2)
+            # Cleanup
+            manager.stop_all_extensions()
+            del large_tensor
+            gc.collect()
+            if device in ("cuda", "rocm"):
+                torch.cuda.empty_cache()
+            await asyncio.sleep(2)
 
         return results
 
@@ -700,6 +774,7 @@ async def run_memory_benchmarks(
     test_large_tensor: bool = True,
     max_extensions_for_large: int = 50,
     test_both_modes: bool = False,
+    backend: str = "auto",
 ):
     """Run the full memory benchmark suite."""
     test_base = IntegrationTestBase()
@@ -713,54 +788,54 @@ async def run_memory_benchmarks(
         baseline = await runner.run_baseline_memory_test()
         all_results["baseline"] = baseline
 
+        if backend == "auto":
+            available_backends = detect_available_backends()
+            if "cpu" not in available_backends:
+                available_backends = ["cpu"] + available_backends
+            else:
+                # Ensure cpu is first
+                available_backends = [b for b in ["cpu"] + available_backends if b != "cpu"]
+                available_backends = ["cpu"] + available_backends
+        else:
+            available_backends = [backend]
+
         if test_small_tensor:
-            # Small tensor tests with multiple extension counts
             print("\n" + "=" * 80)
             print("SMALL TENSOR SCALING TESTS")
             print("=" * 80)
 
-            # CPU tensor tests
             small_tensor_size = (512, 512)  # ~1MB tensor
 
-            if test_both_modes:
-                # Test both modes
-                print("\n--- CPU Tensor Tests (share_torch=False) ---")
-                cpu_results_no_share = await runner.run_scaling_test(
-                    extension_counts, share_torch=False, test_tensor_size=small_tensor_size, use_cuda=False
-                )
-                all_results["cpu_no_share"] = cpu_results_no_share
-
-            print("\n--- CPU Tensor Tests (share_torch=True) ---")
-            cpu_results_share = await runner.run_scaling_test(
-                extension_counts, share_torch=True, test_tensor_size=small_tensor_size, use_cuda=False
-            )
-            all_results["cpu_share"] = cpu_results_share
-
-            # GPU tensor tests if available
-            if CUDA_AVAILABLE:
+            for backend_used in available_backends:
                 if test_both_modes:
-                    print("\n--- GPU Tensor Tests (share_torch=False) ---")
-                    gpu_results_no_share = await runner.run_scaling_test(
-                        extension_counts, share_torch=False, test_tensor_size=small_tensor_size, use_cuda=True
+                    print(f"\n--- {backend_used.upper()} Tensor Tests (share_torch=False) ---")
+                    results_no_share = await runner.run_scaling_test(
+                        extension_counts,
+                        share_torch=False,
+                        test_tensor_size=small_tensor_size,
+                        device=backend_used,
                     )
-                    all_results["gpu_no_share"] = gpu_results_no_share
+                    all_results[f"{backend_used}_no_share"] = results_no_share
 
-                print("\n--- GPU Tensor Tests (share_torch=True) ---")
-                gpu_results_share = await runner.run_scaling_test(
-                    extension_counts, share_torch=True, test_tensor_size=small_tensor_size, use_cuda=True
+                print(f"\n--- {backend_used.upper()} Tensor Tests (share_torch=True) ---")
+                results_share = await runner.run_scaling_test(
+                    extension_counts,
+                    share_torch=True,
+                    test_tensor_size=small_tensor_size,
+                    device=backend_used,
                 )
-                all_results["gpu_share"] = gpu_results_share
+                all_results[f"{backend_used}_share"] = results_share
 
         if test_large_tensor:
-            # Large tensor sharing test
-            large_results = await runner.run_large_tensor_sharing_test(
-                num_extensions=min(max_extensions_for_large, max(extension_counts)),
-                tensor_gb=2.0,
-                test_both_modes=test_both_modes,
-            )
-            all_results["large_tensor_sharing"] = large_results
+            for backend_used in available_backends:
+                large_results = await runner.run_large_tensor_sharing_test(
+                    num_extensions=min(max_extensions_for_large, max(extension_counts)),
+                    tensor_gb=2.0,
+                    test_both_modes=test_both_modes,
+                    device=backend_used,
+                )
+                all_results[f"{backend_used}_large"] = large_results
 
-        # Print final summary
         print_memory_benchmark_summary(all_results)
 
     finally:
@@ -779,48 +854,55 @@ def print_memory_benchmark_summary(results: dict):
         print("\nBaseline Memory Usage:")
         print(f"  RAM: {baseline['total_ram_mb']:.1f} MB")
         print(f"  VRAM: {baseline['total_vram_mb']:.1f} MB")
-        if baseline.get("gpu_total_mb", 0) > 0:
-            gpu_pct = (baseline["gpu_used_mb"] / baseline["gpu_total_mb"]) * 100
-            print(
-                f"  GPU Total: {baseline['gpu_used_mb']:.1f} / "
-                f"{baseline['gpu_total_mb']:.1f} MB ({gpu_pct:.1f}% used)"
-            )
+        gpu_total = baseline.get("gpu_total_mb", 0.0)
+        gpu_used = baseline.get("gpu_used_mb", 0.0)
+        try:
+            gpu_total = float(gpu_total) if gpu_total not in (None, 0) else 0.0
+        except Exception:
+            gpu_total = 0.0
+        try:
+            gpu_used = float(gpu_used) if gpu_used is not None else 0.0
+        except Exception:
+            gpu_used = 0.0
+        if gpu_total > 0:
+            gpu_pct = (gpu_used / gpu_total) * 100 if gpu_total else 0
+            print(f"  GPU Total: {gpu_used:.1f} / {gpu_total:.1f} MB ({gpu_pct:.1f}% used)")
+        else:
+            print("  GPU Total: N/A")
 
-    # Scaling results
-    for test_type in ["cpu_no_share", "cpu_share", "gpu_no_share", "gpu_share"]:
+    # Dynamically print all *_share and *_no_share results
+    share_types = [k for k in results if k.endswith(("_share", "_no_share"))]
+    for test_type in share_types:
         if test_type in results:
-            print(f"\n{test_type.upper().replace('_', ' ')} Results:")
-
+            backend = test_type.replace("_share", "").replace("_no_share", "").upper()
+            share_mode = "SHARE_TORCH=TRUE" if test_type.endswith("_share") else "SHARE_TORCH=FALSE"
+            print(f"\n{backend} {share_mode} Results:")
             headers = ["Extensions", "RAM/Ext (MB)", "Tensor RAM (MB)", "GPU (MB)", "Shared"]
             table_data = []
-
             for result in results[test_type]:
-                # Use GPU memory delta if available, otherwise fall back to VRAM
                 gpu_memory = result.get("send_gpu_delta_mb", result.get("send_vram_delta_mb", 0))
-                table_data.append(
-                    [
-                        result["num_extensions"],
-                        f"{result['ram_per_extension_mb']:.1f}",
-                        f"{result['send_ram_delta_mb']:.1f}",
-                        f"{gpu_memory:.1f}",
+                table_data.append([
+                    result["num_extensions"],
+                    f"{result['ram_per_extension_mb']:.1f}",
+                    f"{result['send_ram_delta_mb']:.1f}",
+                    f"{gpu_memory:.1f}",
+                    (
                         "Yes"
                         if result.get("shared_memory")
-                        else "No"
-                        if result.get("shared_memory") is False
-                        else "N/A",
-                    ]
-                )
+                        else "No" if result.get("shared_memory") is False else "N/A"
+                    ),
+                ])
+            if table_data:
+                print(tabulate(table_data, headers=headers, tablefmt="grid"))
 
-            print(tabulate(table_data, headers=headers, tablefmt="grid"))
-
-    # Large tensor sharing results
-    if "large_tensor_sharing" in results:
-        print("\n2GB TENSOR SHARING TEST:")
-        large_results = results["large_tensor_sharing"]
-
-        # Process CPU results
-        if "cpu" in large_results:
-            print("\nCPU Tensor Results:")
+    # Large tensor sharing results for all backends
+    large_keys = [k for k in results if k.endswith("_large")]
+    for large_key in large_keys:
+        backend = large_key.replace("_large", "").upper()
+        print(f"\n2GB TENSOR SHARING TEST: {backend}")
+        large_results = results[large_key]
+        for dev in large_results:
+            print(f"\n{dev.upper()} Tensor Results:")
             headers = [
                 "Config",
                 "Tensor Size (MB)",
@@ -829,94 +911,30 @@ def print_memory_benchmark_summary(results: dict):
                 "Send Time (s)",
             ]
             table_data = []
-
             for share_torch in [False, True]:
                 key = f"share_torch_{share_torch}"
-                if key in large_results["cpu"]:
-                    r = large_results["cpu"][key]
-                    table_data.append(
-                        [
-                            f"share_torch={share_torch}",
-                            f"{r['tensor_size_mb']:.1f}",
-                            f"{r['ram_for_distribution_mb']:.1f}",
-                            f"{r['ram_per_extension_copy_mb']:.1f}",
-                            f"{r['send_time_s']:.2f}",
-                        ]
-                    )
-
+                if key in large_results[dev]:
+                    r = large_results[dev][key]
+                    table_data.append([
+                        f"share_torch={share_torch}",
+                        f"{r['tensor_size_mb']:.1f}",
+                        f"{r['ram_for_distribution_mb']:.1f}",
+                        f"{r['ram_per_extension_copy_mb']:.1f}",
+                        f"{r['send_time_s']:.2f}",
+                    ])
             if table_data:
                 print(tabulate(table_data, headers=headers, tablefmt="grid"))
-
-                # Analysis for CPU
-                if "share_torch_False" in large_results["cpu"] and "share_torch_True" in large_results["cpu"]:
-                    no_share = large_results["cpu"]["share_torch_False"]
-                    share = large_results["cpu"]["share_torch_True"]
-
+                # Analysis for this backend
+                if "share_torch_False" in large_results[dev] and "share_torch_True" in large_results[dev]:
+                    no_share = large_results[dev]["share_torch_False"]
+                    share = large_results[dev]["share_torch_True"]
                     savings = no_share["ram_for_distribution_mb"] - share["ram_for_distribution_mb"]
                     savings_pct = (
                         (savings / no_share["ram_for_distribution_mb"] * 100)
-                        if no_share["ram_for_distribution_mb"] > 0
-                        else 0
+                        if no_share["ram_for_distribution_mb"] else 0
                     )
-
-                    print("\nCPU Memory Sharing Analysis:")
+                    print(f"\n{dev.upper()} Memory Sharing Analysis:")
                     print(f"  Memory saved with share_torch: {savings:.1f} MB ({savings_pct:.1f}%)")
-
-        # Process GPU results
-        if "gpu" in large_results:
-            print("\nGPU Tensor Results:")
-            headers = [
-                "Config",
-                "Tensor Size (MB)",
-                "RAM Dist (MB)",
-                "GPU Created (MB)",
-                "GPU Dist (MB)",
-                "Send Time (s)",
-            ]
-            table_data = []
-
-            for share_torch in [False, True]:
-                key = f"share_torch_{share_torch}"
-                if key in large_results["gpu"]:
-                    r = large_results["gpu"][key]
-                    table_data.append(
-                        [
-                            f"share_torch={share_torch}",
-                            f"{r['tensor_size_mb']:.1f}",
-                            f"{r['ram_for_distribution_mb']:.1f}",
-                            f"{r['gpu_for_tensor_creation_mb']:.1f}",
-                            f"{r['gpu_for_distribution_mb']:.1f}",
-                            f"{r['send_time_s']:.2f}",
-                        ]
-                    )
-
-            if table_data:
-                print(tabulate(table_data, headers=headers, tablefmt="grid"))
-
-                # Analysis for GPU
-                if "share_torch_False" in large_results["gpu"] and "share_torch_True" in large_results["gpu"]:
-                    no_share = large_results["gpu"]["share_torch_False"]
-                    share = large_results["gpu"]["share_torch_True"]
-
-                    ram_savings = no_share["ram_for_distribution_mb"] - share["ram_for_distribution_mb"]
-                    ram_savings_pct = (
-                        (ram_savings / no_share["ram_for_distribution_mb"] * 100)
-                        if no_share["ram_for_distribution_mb"] > 0
-                        else 0
-                    )
-
-                    print("\nGPU Memory Sharing Analysis:")
-                    print(f"  RAM saved with share_torch: {ram_savings:.1f} MB ({ram_savings_pct:.1f}%)")
-
-                    gpu_savings = no_share["gpu_for_distribution_mb"] - share["gpu_for_distribution_mb"]
-                    if no_share["gpu_for_distribution_mb"] > 0:
-                        gpu_savings_pct = gpu_savings / no_share["gpu_for_distribution_mb"] * 100
-                        print(
-                            f"  GPU memory saved with share_torch: {gpu_savings:.1f} MB "
-                            f"({gpu_savings_pct:.1f}%)"
-                        )
-                    elif gpu_savings != 0:
-                        print(f"  GPU memory difference: {gpu_savings:.1f} MB")
 
 
 def main():
@@ -951,37 +969,149 @@ Examples:
         help="Test both share_torch=True and share_torch=False (default: only share_torch=True)",
     )
 
+    parser.add_argument(
+        "--backend",
+        choices=["auto", "cuda", "xpu", "rocm", "cpu"],
+        default="auto",
+        help=(
+            "Device backend to use: auto (default), cuda (NVIDIA/AMD ROCm), "
+            "xpu (Intel oneAPI), rocm (AMD ROCm), or cpu"
+        ),
+    )
+
+    parser.add_argument(
+        "--device",
+        type=str,
+        default=None,
+        help="(Legacy) Device index (int) or 'cpu' to force CPU mode. Use --backend for multi-backend tests.",
+    )
+
     args = parser.parse_args()
 
-    # Determine extension counts
+    device_idx = None  # Ensure device_idx is always defined
+
+    # Determine extension counts (move this up before device/backend logic)
     if args.counts:
         extension_counts = [int(x.strip()) for x in args.counts.split(",")]
     else:
-        # Default progression: 1, 2, 5, 10, 20, 50, 100
+        # Default progression: 1, 2, 5, 10, 20
         extension_counts = [1, 2, 5, 10, 20]
         if args.max_extensions >= 50:
             extension_counts.append(50)
         if args.max_extensions >= 100:
             extension_counts.append(100)
-
         # Filter based on max
         extension_counts = [c for c in extension_counts if c <= args.max_extensions]
 
-    # Check dependencies
-    if not TORCH_AVAILABLE:
-        print("PyTorch not available. Install with: pip install torch")
-        return 1
+    # Set device and backend
+    backend = args.backend
+    device_str = "cpu"
+    device_name = "cpu"
+    backend_used = "cpu"
+    try:
+        import torch  # type: ignore
+        cuda_available = torch.cuda.is_available()
+        xpu_available = hasattr(torch, "xpu") and torch.xpu.is_available()
+        # Auto backend selection
+        if backend == "auto":
+            if cuda_available:
+                backend = "cuda"
+            elif xpu_available:
+                backend = "xpu"
+            else:
+                backend = "cpu"
+        if backend == "cuda" and cuda_available:
+            # Use getattr to avoid linter errors for torch.version.hip
+            torch_version = getattr(torch, 'version', None)
+            hip_version = getattr(torch_version, 'hip', None) if torch_version else None
+            if platform.system() == "Linux" and hip_version is not None:
+                print("[PyIsolate] ROCm (AMD) backend detected on Linux.")
+            elif platform.system() == "Windows":
+                print("[PyIsolate] ROCm is not supported on Windows. Falling back to CPU.")
+                backend = "cpu"
+            if backend == "cuda":
+                if args.device is not None:
+                    if str(args.device).lower() == "cpu":
+                        backend = "cpu"
+                        device_str = "cpu"
+                        device_name = "cpu"
+                        print("[PyIsolate] Forcing CPU mode due to --device=cpu")
+                        args.no_gpu = True
+                    else:
+                        try:
+                            device_idx = int(args.device)
+                            torch.cuda.set_device(device_idx)
+                            device_str = f"cuda{device_idx}"
+                            device_name = torch.cuda.get_device_name(device_idx)
+                        except ValueError:
+                            print(f"Invalid --device value: {args.device}. Must be integer or 'cpu'.")
+                            sys.exit(1)
+                else:
+                    device_idx = torch.cuda.current_device()
+                    device_str = f"cuda{device_idx}"
+                    device_name = torch.cuda.get_device_name(device_idx)
+                backend_used = "cuda"
+                print(f"[PyIsolate] Using CUDA/ROCm device {device_idx}: {device_name}")
+        elif backend == "xpu" and xpu_available:
+            if args.device is not None:
+                if str(args.device).lower() == "cpu":
+                    backend = "cpu"
+                    device_str = "cpu"
+                    device_name = "cpu"
+                    print("[PyIsolate] Forcing CPU mode due to --device=cpu")
+                    args.no_gpu = True
+                else:
+                    try:
+                        device_idx = int(args.device)
+                        torch.xpu.set_device(device_idx)
+                        device_str = f"xpu{device_idx}"
+                        device_name = (
+                            torch.xpu.get_device_name(device_idx)
+                            if hasattr(torch.xpu, "get_device_name")
+                            else "Intel XPU"
+                        )
+                    except ValueError:
+                        print(f"Invalid --device value: {args.device}. Must be integer or 'cpu'.")
+                        sys.exit(1)
+            else:
+                device_idx = torch.xpu.current_device()
+                device_str = f"xpu{device_idx}"
+                device_name = (
+                    torch.xpu.get_device_name(device_idx)
+                    if hasattr(torch.xpu, "get_device_name")
+                    else "Intel XPU"
+                )
+            backend_used = "xpu"
+            print(f"[PyIsolate] Using Intel XPU device {device_idx}: {device_name}")
+        else:
+            print("[PyIsolate] No supported GPU backend available, using CPU only.")
+    except Exception as e:
+        print(f"[PyIsolate] Error setting device/backend: {e}")
 
-    print(f"Running on: {platform.system()} {platform.release()}")
+    # Generate results filename with backend and device info
+    import datetime
+    import socket
+    computer = socket.gethostname()
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    device_tag = f"{backend_used}{device_idx if device_idx is not None else 0}"
+    if device_str != "cpu":
+        safe_device_name = device_name.replace(" ", "").replace("/", "-")
+        device_tag = f"{backend_used}{device_idx if device_idx is not None else 0}-{safe_device_name}"
+    results_filename = f"memory_benchmark_results_{computer}_{device_tag}_{timestamp}.txt"
+    print(f"\n[PyIsolate] Results will be saved to: {results_filename}")
 
-    if not CUDA_AVAILABLE:
-        print("CUDA not available. GPU memory tests will be skipped.")
-
-    if not NVML_AVAILABLE:
-        print("nvidia-ml-py3 not installed. Install with: pip install nvidia-ml-py3")
-        print("VRAM tracking will not be available.")
-    else:
-        print("NVML available for GPU memory tracking")
+    # For memory tracking, print backend-specific info
+    if backend_used == "cuda":
+        print("[PyIsolate] Using NVML for CUDA/ROCm memory tracking.")
+    elif backend_used == "xpu":
+        try:
+            import torch  # type: ignore
+            mem_alloc = torch.xpu.memory_allocated() if hasattr(torch, "xpu") else 0
+            print(f"[PyIsolate] Intel XPU memory allocated: {mem_alloc / 1024 / 1024:.1f} MB")
+        except Exception as e:
+            print(f"[PyIsolate] Could not get Intel XPU memory info: {e}")
+    # For AMD ROCm, optionally try rocm-smi if available (not implemented here,
+    # but can be added with subprocess)
 
     # Determine what to test
     test_small = not args.large_only
@@ -995,6 +1125,7 @@ Examples:
                 test_small_tensor=test_small,
                 test_large_tensor=test_large,
                 test_both_modes=args.test_both_modes,
+                backend=args.backend,
             )
         )
         return 0

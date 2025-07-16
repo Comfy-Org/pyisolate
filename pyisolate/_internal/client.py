@@ -1,9 +1,7 @@
 import asyncio
 import importlib.util
 import logging
-import os.path
 import sys
-import sysconfig
 from contextlib import nullcontext
 
 from ..config import ExtensionConfig
@@ -26,7 +24,18 @@ async def async_entrypoint(
     logger.debug("Loading extension with Python executable: %s", sys.executable)
     logger.debug("Loading extension from: %s", module_path)
 
-    sys.path.insert(0, sysconfig.get_path("platlib"))
+    # Robustly ensure only the venv's site-packages are present in sys.path
+    import os
+    import site
+
+    venv_prefix = sys.prefix
+    venv_site_packages = [p for p in site.getsitepackages() if p.startswith(venv_prefix)]
+    # Remove all site-packages not in the current venv
+    sys.path = [p for p in sys.path if not (("site-packages" in p) and (not p.startswith(venv_prefix)))]
+    # Prepend all venv site-packages to sys.path (in order)
+    for p in reversed(venv_site_packages):
+        if p not in sys.path:
+            sys.path.insert(0, p)
 
     rpc = AsyncRPC(recv_queue=to_extension, send_queue=from_extension)
     extension = extension_type()

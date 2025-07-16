@@ -23,8 +23,16 @@ Write-Host "PyIsolate Benchmark Runner for Windows (PowerShell)" -ForegroundColo
 Write-Host "================================================================" -ForegroundColor Cyan
 Write-Host ""
 
+# Prompt for CUDA device index
+$device = Read-Host "Enter CUDA device index to use (leave blank for default GPU/CPU)"
+if ($device -ne "") {
+    # Always pass --device <index> to both benchmark.py and memory_benchmark.py
+    $device_args = @("--device", "$device")
+} else {
+    $device_args = @()
+}
+
 # Set up paths and filenames
-$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
 $OutputFile = "benchmark_results_${env:COMPUTERNAME}_${Timestamp}.txt"
 $VenvDir = ".benchmark_venv"
@@ -96,20 +104,34 @@ Write-Host ""
 Write-Host "Step 4: Detecting GPU and installing PyTorch..."
 Write-Host ""
 
-$cudaAvailable = $false
-$torchIndex = "https://download.pytorch.org/whl/cpu"
+# Detect OS
+$IsWindows = $env:OS -eq "Windows_NT"
 
-# Check for CUDA
+# Detect GPU vendor
+$gpuInfo = (Get-WmiObject Win32_VideoController | Select-Object -ExpandProperty Name) -join ", "
+$gpuVendor = "cpu"
+if ($gpuInfo -match "NVIDIA") {
+    $gpuVendor = "nvidia"
+} elseif ($gpuInfo -match "AMD" -or $gpuInfo -match "Radeon") {
+    $gpuVendor = "amd"
+} elseif ($gpuInfo -match "Intel") {
+    $gpuVendor = "intel"
+}
+Write-Host "Detected GPU(s): $gpuInfo"
+Write-Host "GPU Vendor: $gpuVendor"
+
+# Set PyTorch index URL and backend argument
+$torchIndex = "https://download.pytorch.org/whl/cpu"
+$backend_arg = @("--backend", "auto")  # Default
+
+if ($gpuVendor -eq "nvidia") {
+    # CUDA version logic as before
 $nvidiaSmi = Get-Command nvidia-smi -ErrorAction SilentlyContinue
 if ($nvidiaSmi) {
     Write-Host "NVIDIA GPU detected. Checking CUDA version..."
-    $cudaInfo = & nvidia-smi --query-gpu=driver_version --format=csv,noheader 2>$null
-    if ($LASTEXITCODE -eq 0) {
         $cudaVersion = (& nvidia-smi | Select-String "CUDA Version" | ForEach-Object { $_ -match "CUDA Version:\s*(\d+\.\d+)" | Out-Null; $matches[1] })
         if ($cudaVersion) {
             Write-Host "Detected CUDA version: $cudaVersion" -ForegroundColor Green
-            "[$(Get-Date)] CUDA detected: $cudaVersion" | Add-Content $OutputFile
-
             $cudaMajor = [int]($cudaVersion.Split('.')[0])
             if ($cudaMajor -ge 12) {
                 $torchIndex = "https://download.pytorch.org/whl/cu121"
@@ -120,9 +142,21 @@ if ($nvidiaSmi) {
             }
         }
     }
+    $backend_arg = @("--backend", "cuda")
+} elseif ($gpuVendor -eq "amd") {
+    if ($IsWindows) {
+        Write-Host "AMD GPU detected, but ROCm is not supported on Windows. Falling back to CPU."
+        $torchIndex = "https://download.pytorch.org/whl/cpu"
+        $backend_arg = @("--backend", "auto")
 } else {
-    Write-Host "No NVIDIA GPU detected. Installing CPU-only PyTorch..."
-    "[$(Get-Date)] No CUDA detected, using CPU PyTorch" | Add-Content $OutputFile
+        $torchIndex = "https://download.pytorch.org/whl/rocm5.4.2"
+        $backend_arg = @("--backend", "cuda")  # PyTorch uses 'cuda' for ROCm
+        Write-Host "AMD GPU detected. ROCm is only supported on Linux. Will attempt ROCm PyTorch."
+    }
+} elseif ($gpuVendor -eq "intel") {
+    Write-Host "Intel GPU detected. Attempting to use PyTorch XPU backend (requires PyTorch 2.7+ and latest Intel drivers)."
+    $torchIndex = "https://download.pytorch.org/whl/xpu"
+    $backend_arg = @("--backend", "xpu")
 }
 
 Write-Host ""
@@ -146,8 +180,8 @@ if ($LASTEXITCODE -ne 0) {
 Write-Host ""
 Write-Host "Step 5: Installing remaining dependencies..."
 
-$ErrorActionPreference = "SilentlyContinue"
-$output = & uv pip install numpy psutil tabulate nvidia-ml-py3 pytest pytest-asyncio pyyaml 2>&1
+# Always install typing_extensions as part of dependencies
+$output = & uv pip install numpy psutil tabulate nvidia-ml-py3 pytest pytest-asyncio pyyaml typing_extensions 2>&1
 $ErrorActionPreference = "Continue"
 $output | Out-String | Tee-Object -Append $OutputFile
 
@@ -198,7 +232,7 @@ Write-Host "Output is being saved to the results file..."
 
 # Run benchmark - PowerShell handles subprocess differently
 $env:PYTHONUNBUFFERED = "1"
-$output = & python benchmark.py --quick 2>&1 | Out-String
+$output = & python benchmark.py --quick @device_args @backend_arg 2>&1 | Out-String
 $benchmarkResult = $LASTEXITCODE
 $output | Tee-Object -Append "..\$OutputFile"
 
@@ -220,6 +254,9 @@ Write-Host "Step 8: Running memory benchmarks..."
 "================================================================" | Add-Content "..\$OutputFile"
 "" | Add-Content "..\$OutputFile"
 
+# Before running the memory benchmark, always set backend_arg to --backend auto
+$memory_backend_arg = @("--backend", "auto")
+
 Write-Host "Running memory_benchmark.py (this may take several minutes)..."
 Write-Host "NOTE: This test intentionally pushes VRAM limits to find maximum capacity"
 
@@ -228,7 +265,7 @@ Write-Host "NOTE: If nothing has changed after 90 minutes, press Ctrl+C" -Foregr
 Write-Host "The test intentionally pushes VRAM limits and may appear frozen when it hits limits."
 
 # Run memory benchmark
-$output = & python memory_benchmark.py --counts 1,2,5,10,25,50,100 2>&1 | Out-String
+$output = & python memory_benchmark.py --counts 1,2,5,10,25,50,100 @device_args @memory_backend_arg 2>&1 | Out-String
 $memoryResult = $LASTEXITCODE
 $output | Tee-Object -Append "..\$OutputFile"
 

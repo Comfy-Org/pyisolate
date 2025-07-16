@@ -13,9 +13,10 @@ Benchmark categories:
 
 import asyncio
 import gc
+import os
 import statistics
 import time
-from typing import Optional
+from typing import Any, Optional
 
 import numpy as np
 import psutil
@@ -27,6 +28,18 @@ try:
 
     TORCH_AVAILABLE = True
     CUDA_AVAILABLE = torch.cuda.is_available()
+    # Set CUDA device from environment variable if specified
+    cuda_env = os.environ.get("PYISOLATE_CUDA_DEVICE")
+    if CUDA_AVAILABLE and cuda_env is not None:
+        torch.cuda.set_device(int(cuda_env))
+        print(f"[PyIsolate] Using CUDA device {cuda_env}: {torch.cuda.get_device_name(int(cuda_env))}")
+    elif CUDA_AVAILABLE:
+        print(
+            f"[PyIsolate] Using default CUDA device {torch.cuda.current_device()}: "
+            f"{torch.cuda.get_device_name(torch.cuda.current_device())}"
+        )
+    else:
+        print("[PyIsolate] CUDA not available, using CPU only.")
 except ImportError:
     TORCH_AVAILABLE = False
     CUDA_AVAILABLE = False
@@ -191,128 +204,24 @@ class BenchmarkRunner:
 class TestRPCBenchmarks(IntegrationTestBase):
     """Benchmark tests for RPC call overhead."""
 
+    benchmark_ext_shared: Optional[object] = None
+    runner: Optional[BenchmarkRunner] = None
+
     @pytest.fixture(autouse=True)
     async def setup_benchmark_environment(self):
         """Set up the benchmark environment once for all tests."""
         await self.setup_test_environment("benchmark")
 
         # Create benchmark extension with all required dependencies
-        benchmark_extension_code = '''
-import asyncio
-import numpy as np
-from shared import ExampleExtension, DatabaseSingleton
-from pyisolate import local_execution
 
-try:
-    import torch
-    TORCH_AVAILABLE = True
-except ImportError:
-    TORCH_AVAILABLE = False
-
-class BenchmarkExtension(ExampleExtension):
-    """Extension with methods for benchmarking RPC overhead."""
-
-    async def initialize(self):
-        """Initialize the benchmark extension."""
-        pass
-
-    async def prepare_shutdown(self):
-        """Clean shutdown of benchmark extension."""
-        pass
-
-    async def do_stuff(self, value):
-        """Required abstract method from ExampleExtension."""
-        return f"Processed: {value}"
-
-    # ========================================
-    # Small Data Benchmarks
-    # ========================================
-
-    async def echo_int(self, value: int) -> int:
-        """Echo an integer value."""
-        return value
-
-    async def echo_string(self, value: str) -> str:
-        """Echo a string value."""
-        return value
-
-    @local_execution
-    def echo_int_local(self, value: int) -> int:
-        """Local execution baseline for integer echo."""
-        return value
-
-    @local_execution
-    def echo_string_local(self, value: str) -> str:
-        """Local execution baseline for string echo."""
-        return value
-
-    # ========================================
-    # Large Data Benchmarks
-    # ========================================
-
-    async def process_large_array(self, array: np.ndarray) -> int:
-        """Process a large numpy array and return its size."""
-        return array.size
-
-    async def echo_large_bytes(self, data: bytes) -> int:
-        """Echo large byte data and return its length."""
-        return len(data)
-
-    @local_execution
-    def process_large_array_local(self, array: np.ndarray) -> int:
-        """Local execution baseline for large array processing."""
-        return array.size
-
-    # ========================================
-    # Torch Tensor Benchmarks
-    # ========================================
-
-    async def process_small_tensor(self, tensor) -> tuple:
-        """Process a small torch tensor."""
-        if not TORCH_AVAILABLE:
-            return (0, "cpu")
-        return (tensor.numel(), str(tensor.device))
-
-    async def process_large_tensor(self, tensor) -> tuple:
-        """Process a large torch tensor."""
-        if not TORCH_AVAILABLE:
-            return (0, "cpu")
-        return (tensor.numel(), str(tensor.device))
-
-    @local_execution
-    def process_small_tensor_local(self, tensor) -> tuple:
-        """Local execution baseline for small tensor processing."""
-        if not TORCH_AVAILABLE:
-            return (0, "cpu")
-        return (tensor.numel(), str(tensor.device))
-
-    # ========================================
-    # Recursive/Complex Call Patterns
-    # ========================================
-
-    async def recursive_host_call(self, depth: int) -> int:
-        """Make recursive calls through host singleton."""
-        if depth <= 0:
-            return 0
-
-        db = DatabaseSingleton()
-        await db.set_value(f"depth_{depth}", depth)
-        value = await db.get_value(f"depth_{depth}")
-        return value + await self.recursive_host_call(depth - 1)
-
-def example_entrypoint():
-    """Entry point for the benchmark extension."""
-    return BenchmarkExtension()
-'''
-
-        self.create_extension(
-            "benchmark_ext",
-            benchmark_extension_code,
-            dependencies=["numpy>=1.26.0", "torch>=2.0.0"] if TORCH_AVAILABLE else ["numpy>=1.26.0"],
-        )
+        # self.create_extension(
+        #     "benchmark_ext",
+        #     benchmark_extension_code,
+        #     dependencies=["numpy>=1.26.0", "torch>=2.0.0"] if TORCH_AVAILABLE else ["numpy>=1.26.0"],
+        # )
 
         # Load extensions
-        extensions_config = [{"name": "benchmark_ext"}]
+        extensions_config: list[dict[str, Any]] = [{"name": "benchmark_ext"}]
 
         # Add share_torch config if available
         if TORCH_AVAILABLE:
@@ -320,6 +229,11 @@ def example_entrypoint():
 
         self.extensions = await self.load_extensions(extensions_config[:1])  # Load one for now
         self.benchmark_ext = self.extensions[0]
+        self.benchmark_ext_shared = None
+        if TORCH_AVAILABLE and len(extensions_config) > 1:
+            shared_exts = await self.load_extensions([extensions_config[1]])
+            if shared_exts:
+                self.benchmark_ext_shared = shared_exts[0]
 
         # Initialize benchmark runner
         self.runner = BenchmarkRunner(warmup_runs=3, benchmark_runs=15)
@@ -336,6 +250,7 @@ def example_entrypoint():
         print("SMALL DATA BENCHMARKS")
         print("=" * 60)
 
+        assert self.runner is not None  # type: ignore
         # Integer benchmarks
         test_int = 42
         await self.runner.run_benchmark(
@@ -361,6 +276,7 @@ def example_entrypoint():
         print("LARGE DATA BENCHMARKS")
         print("=" * 60)
 
+        assert self.runner is not None  # type: ignore
         # Large numpy array (10MB)
         large_array = np.random.random((1024, 1024))  # ~8MB float64
 
@@ -393,6 +309,7 @@ def example_entrypoint():
         print("TORCH TENSOR BENCHMARKS")
         print("=" * 60)
 
+        assert self.runner is not None  # type: ignore
         # Small tensor (CPU)
         with torch.inference_mode():
             small_tensor_cpu = torch.randn(100, 100)  # ~40KB
@@ -440,6 +357,7 @@ def example_entrypoint():
         print("COMPLEX CALL PATTERN BENCHMARKS")
         print("=" * 60)
 
+        assert self.runner is not None  # type: ignore
         # Recursive calls through host singleton
         await self.runner.run_benchmark(
             "Recursive Host Calls (depth=3)", lambda: self.benchmark_ext.recursive_host_call(3)
@@ -455,10 +373,12 @@ def example_entrypoint():
         # Small delay to ensure this runs last
         await asyncio.sleep(0.1)
 
+        assert self.runner is not None  # type: ignore
         self.runner.print_summary()
 
         # Basic assertions to ensure benchmarks ran
         assert len(self.runner.results) > 0, "No benchmark results found"
+        assert self.runner is not None  # type: ignore
 
         # Verify we have both local and RPC results for comparison
         local_results = [r for r in self.runner.results if "local" in r.name.lower()]

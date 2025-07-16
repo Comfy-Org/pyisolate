@@ -144,6 +144,12 @@ class ExtensionBase(ExtensionLocal):
         ...     async def process_data(self, data: list) -> float:
         ...         # Extension method callable from host
         ...         import numpy as np
+        ...         from pyisolate._internal.gpu_utils import (
+        ...             maybe_to_dlpack,
+        ...             maybe_from_dlpack,
+        ...             maybe_serialize_tensor,
+        ...             maybe_deserialize_tensor,
+        ...         )
         ...         return np.array(data).mean()
 
     Attributes:
