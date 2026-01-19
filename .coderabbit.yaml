@@ -27,7 +27,7 @@ reviews:
         - Type Hints
           - All public functions and classes MUST have complete type hints (enforced by mypy with `disallow_untyped_defs`)
           - NEVER use `Any` unless absolutely necessary and justified
-          - NEVER use `# type: ignore`, `@ts-ignore`, or cast to `Any` unless absolutely necessary and justified
+          - NEVER use `# type: ignore` or cast to `Any` unless absolutely necessary and justified
           - Use `TypeVar`, `Generic`, `TypedDict`, `Literal`, `Union` appropriately
 
         - Architecture
@@ -79,4 +79,3 @@ reviews:
         - Report statistical measures (mean, std dev, min, max)
         - Document what is being measured and why
         - GPU benchmarks should handle CUDA OOM gracefully
-
