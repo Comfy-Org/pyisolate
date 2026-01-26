@@ -1,3 +1,4 @@
+# pyright: reportMissingImports=false
 """
 Integration tests for passing torch.Tensor objects between host and extensions.
 
@@ -20,7 +21,7 @@ from pyisolate import ExtensionConfig, ExtensionManager, ExtensionManagerConfig
 
 # Import shared components from example
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "example"))
-from shared import DatabaseSingleton, ExampleExtensionBase
+from shared import DatabaseSingleton, ExampleExtensionBase  # type: ignore
 
 # Check torch availability
 try:
@@ -28,6 +29,19 @@ try:
 
     HAS_TORCH = True
     HAS_CUDA = torch.cuda.is_available()
+    # Set CUDA device from environment variable if specified
+    cuda_env = os.environ.get("PYISOLATE_CUDA_DEVICE")
+    if HAS_CUDA and cuda_env is not None:
+        torch.cuda.set_device(int(cuda_env))
+        print(f"[PyIsolate] Using CUDA device {cuda_env}: {torch.cuda.get_device_name(int(cuda_env))}")
+    elif HAS_CUDA:
+        print(
+            f"[PyIsolate] Using default CUDA device "
+            f"{torch.cuda.current_device()}: "
+            f"{torch.cuda.get_device_name(torch.cuda.current_device())}"
+        )
+    else:
+        print("[PyIsolate] CUDA not available, using CPU only.")
 except ImportError:
     torch = None
     HAS_TORCH = False

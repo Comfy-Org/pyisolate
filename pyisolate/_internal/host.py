@@ -270,7 +270,7 @@ class Extension(Generic[T]):
         self._install_dependencies()
 
         # Set the Python executable from the virtual environment
-        executable = sys._base_executable if os.name == "nt" else str(self.venv_path / "bin" / "python")
+        executable = sys._base_executable if os.name == "nt" else str(self.venv_path / "bin" / "python")  # type: ignore
         logger.debug(f"Launching extension {self.name} with Python executable: {executable}")
         self.mp.set_executable(executable)
         context = nullcontext()
@@ -309,7 +309,9 @@ class Extension(Generic[T]):
                 raise RuntimeError("uv command not found in PATH")
 
             # Use the resolved, validated path
-            subprocess.check_call([uv_path, "venv", str(self.venv_path)])  # noqa: S603
+            import sys
+            py_version = f"python{sys.version_info.major}.{sys.version_info.minor}"
+            subprocess.check_call([uv_path, "venv", str(self.venv_path), "--python", py_version])  # noqa: S603
 
     # TODO(Optimization): Only do this when we update a extension to reduce startup time?
     def _install_dependencies(self):
@@ -340,21 +342,37 @@ class Extension(Generic[T]):
         cache_dir.mkdir(exist_ok=True)
         uv_common_args.extend(["--cache-dir", str(cache_dir)])
 
-        # Install the same version of torch as the current process
+        # Detect Intel/XPU backend for special index URL
+        use_xpu_backend = False
+        backend_env = os.environ.get("PYISOLATE_BACKEND", "auto").lower()
+        if backend_env == "xpu" or self.config.get("backend") == "xpu":
+            use_xpu_backend = True
+        # Also check for Intel GPU in device name if available
+        if not use_xpu_backend and "intel" in str(self.config.get("device_name", "")).lower():
+            use_xpu_backend = True
+
+        # Install the same version of torch as the current process, if needed
+        torch_requirement = None
+        torch_index_args = []
         if self.config["share_torch"]:
             import torch
 
             torch_version = torch.__version__
-            if torch_version.endswith("+cpu"):
-                # On Windows, the '+cpu' is not included in the version string
-                torch_version = torch_version[:-4]  # Remove the '+cpu' suffix
-            cuda_version = torch.version.cuda  # type: ignore
-            if cuda_version:
-                uv_common_args += [
+            # Remove any '+cpu', '+xpu', or other local version tags
+            if "+" in torch_version:
+                torch_version = torch_version.split("+")[0]
+            cuda_version = getattr(torch.version, "cuda", None)  # type: ignore
+            if use_xpu_backend:
+                torch_requirement = "torch>=2.7.0"
+                torch_index_args = ["--index-url", "https://download.pytorch.org/whl/xpu"]
+            elif cuda_version:
+                torch_requirement = f"torch=={torch_version}"
+                torch_index_args = [
                     "--extra-index-url",
                     f"https://download.pytorch.org/whl/cu{cuda_version.replace('.', '')}",
                 ]
-            uv_args.append(f"torch=={torch_version}")
+            else:
+                torch_requirement = f"torch=={torch_version}"
 
         # Install extension dependencies from config
         if self.config["dependencies"] or self.config["share_torch"]:
@@ -362,9 +380,20 @@ class Extension(Generic[T]):
 
             # Re-validate dependencies before passing to subprocess (defense in depth)
             safe_dependencies = []
+            torch_in_deps = False
             for dep in self.config["dependencies"]:
                 validate_dependency(dep)
+                # Remove any '+xpu' or '+cpu' from torch dependencies for Intel/XPU
+                if use_xpu_backend and dep.startswith("torch"):
+                    dep = "torch>=2.7.0"
+                if dep.startswith("torch"):
+                    torch_in_deps = True
                 safe_dependencies.append(dep)
+
+            # Only add torch requirement if not already present
+            if torch_requirement and not torch_in_deps:
+                safe_dependencies.insert(0, torch_requirement)
+                uv_args += torch_index_args
 
             # In normal mode, suppress output unless there are actual changes
             always_output = logger.isEnabledFor(logging.DEBUG)
