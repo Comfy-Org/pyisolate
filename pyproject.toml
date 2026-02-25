@@ -4,11 +4,12 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pyisolate"
-version = "0.9.0"
+version = "0.9.1"
 description = "A Python library for dividing execution across multiple virtual environments"
 readme = "README.md"
 requires-python = ">=3.10"
-license = {text = "MIT"}
+license = "MIT"
+license-files = ["LICENSE"]
 authors = [
     {name = "Jacob Segal", email = "jacob.e.segal@gmail.com"},
 ]
@@ -18,7 +19,6 @@ maintainers = [
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
@@ -32,6 +32,8 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
+    "build>=1.2.2",
+    "twine>=5.1.1",
     "pytest>=7.0",
     "pytest-cov>=4.0",
     "pytest-asyncio>=0.21.0",
@@ -63,6 +65,7 @@ bench = [
 docs = [
     "sphinx>=5.0",
     "sphinx-rtd-theme>=1.0",
+    "myst-parser>=2.0",
     "sphinx-markdown-builder>=0.5.4",  # Optional: for markdown output if needed
 ]
 
