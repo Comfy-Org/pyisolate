@@ -25,6 +25,7 @@ from pyisolate._internal.sandbox_detect import (
     _classify_error,
     _read_sysctl,
     _test_bwrap,
+    _test_bwrap_degraded,
     detect_sandbox_capability,
 )
 
@@ -186,6 +187,15 @@ class TestBwrapInvocation:
             assert success is False
             assert "Unexpected error" in error
 
+    def test_bwrap_degraded_test_success(self) -> None:
+        """Test successful degraded bwrap invocation."""
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        with patch("subprocess.run", return_value=mock_result):
+            success, error = _test_bwrap_degraded("/usr/bin/bwrap")
+            assert success is True
+            assert error == ""
+
 
 class TestErrorClassification:
     """Test error message classification."""
@@ -326,7 +336,7 @@ class TestFullDetection:
             assert cap.remediation == ""
 
     def test_ubuntu_apparmor_failure(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Test Ubuntu AppArmor detection and remediation."""
+        """Test Ubuntu AppArmor detection with degraded-mode fallback."""
         monkeypatch.setattr(sys, "platform", "linux")
         with (
             patch("shutil.which", return_value="/usr/bin/bwrap"),
@@ -342,12 +352,43 @@ class TestFullDetection:
                 "pyisolate._internal.sandbox_detect._check_ubuntu_apparmor_restriction",
                 return_value=True,
             ),
+            patch(
+                "pyisolate._internal.sandbox_detect._test_bwrap_degraded",
+                return_value=(True, ""),
+            ),
+        ):
+            cap = detect_sandbox_capability()
+            assert cap.available is True
+            assert cap.restriction_model == RestrictionModel.UBUNTU_APPARMOR
+            assert "apparmor" in cap.remediation.lower()
+            assert cap.raw_error == "Permission denied: uid map"
+
+    def test_ubuntu_apparmor_failure_when_degraded_fails(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Test Ubuntu AppArmor detection when degraded fallback also fails."""
+        monkeypatch.setattr(sys, "platform", "linux")
+        with (
+            patch("shutil.which", return_value="/usr/bin/bwrap"),
+            patch(
+                "pyisolate._internal.sandbox_detect._check_rhel_restriction",
+                return_value=False,
+            ),
+            patch(
+                "pyisolate._internal.sandbox_detect._test_bwrap",
+                return_value=(False, "Permission denied: uid map"),
+            ),
+            patch(
+                "pyisolate._internal.sandbox_detect._check_ubuntu_apparmor_restriction",
+                return_value=True,
+            ),
+            patch(
+                "pyisolate._internal.sandbox_detect._test_bwrap_degraded",
+                return_value=(False, "still blocked"),
+            ),
         ):
             cap = detect_sandbox_capability()
             assert cap.available is False
             assert cap.restriction_model == RestrictionModel.UBUNTU_APPARMOR
-            assert "apparmor" in cap.remediation.lower()
-            assert cap.raw_error == "Permission denied: uid map"
+            assert "degraded: still blocked" in (cap.raw_error or "")
 
     def test_unknown_error_includes_message(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Test that unknown errors include the raw error in remediation."""
@@ -365,6 +406,10 @@ class TestFullDetection:
             patch(
                 "pyisolate._internal.sandbox_detect._classify_error",
                 return_value=RestrictionModel.UNKNOWN,
+            ),
+            patch(
+                "pyisolate._internal.sandbox_detect._test_bwrap_degraded",
+                return_value=(False, "still blocked"),
             ),
         ):
             cap = detect_sandbox_capability()

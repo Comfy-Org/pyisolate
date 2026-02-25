@@ -174,6 +174,47 @@ def _test_bwrap(bwrap_path: str) -> tuple[bool, str]:
         return False, str(exc)
 
 
+def _test_bwrap_degraded(bwrap_path: str) -> tuple[bool, str]:
+    """Test if bwrap works without user namespace isolation.
+
+    This allows degraded sandbox mode on systems that block unprivileged
+    user namespaces (for example Ubuntu AppArmor defaults).
+    """
+    try:
+        # S603: bwrap_path comes from shutil.which(), not user input
+        result = subprocess.run(  # noqa: S603
+            [
+                bwrap_path,
+                "--dev",
+                "/dev",
+                "--proc",
+                "/proc",
+                "--ro-bind",
+                "/usr",
+                "/usr",
+                "--ro-bind",
+                "/bin",
+                "/bin",
+                "--ro-bind",
+                "/lib",
+                "/lib",
+                "--ro-bind",
+                "/lib64",
+                "/lib64",
+                "/usr/bin/true",
+            ],
+            capture_output=True,
+            timeout=10,
+        )
+        if result.returncode == 0:
+            return True, ""
+        return False, result.stderr.decode("utf-8", errors="replace")
+    except subprocess.TimeoutExpired:
+        return False, "bwrap degraded test timed out"
+    except Exception as exc:
+        return False, str(exc)
+
+
 def _classify_error(error: str) -> RestrictionModel:
     """Classify a bwrap error message to determine restriction model."""
     error_lower = error.lower()
@@ -252,6 +293,26 @@ def detect_sandbox_capability() -> SandboxCapability:
     # 5. Classify the failure
     model = _classify_error(error)
     remediation = _REMEDIATION_MESSAGES[model]
+
+    # Try degraded mode on platforms that can still use mount-namespace sandboxing
+    # even when user namespace creation is blocked.
+    if model in {
+        RestrictionModel.UBUNTU_APPARMOR,
+        RestrictionModel.SELINUX,
+        RestrictionModel.ARCH_HARDENED,
+        RestrictionModel.UNKNOWN,
+    }:
+        degraded_success, degraded_error = _test_bwrap_degraded(bwrap_path)
+        if degraded_success:
+            return SandboxCapability(
+                available=True,
+                bwrap_path=bwrap_path,
+                restriction_model=model,
+                remediation=remediation,
+                raw_error=error,
+            )
+        if degraded_error:
+            error = f"{error} | degraded: {degraded_error}"
 
     if model == RestrictionModel.UNKNOWN:
         remediation = remediation.format(error=error[:200])

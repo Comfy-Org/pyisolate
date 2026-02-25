@@ -12,7 +12,8 @@ import pytest
 import tests.harness.test_package as test_package_module
 from pyisolate._internal.adapter_registry import AdapterRegistry
 from pyisolate._internal.rpc_protocol import AsyncRPC, ProxiedSingleton
-from pyisolate.config import ExtensionConfig
+from pyisolate._internal.sandbox_detect import detect_sandbox_capability
+from pyisolate.config import ExtensionConfig, SandboxMode
 from pyisolate.host import Extension
 from pyisolate.interfaces import SerializerRegistryProtocol
 from tests.harness.test_package import ReferenceTestExtension
@@ -54,7 +55,7 @@ class ReferenceAdapter:
             from pyisolate._internal.tensor_serializer import deserialize_tensor, serialize_tensor
 
             registry.register("torch.Tensor", serialize_tensor, deserialize_tensor)
-        except ImportError:
+        except Exception:
             pass
 
     def provide_rpc_services(self) -> list[type[ProxiedSingleton]]:
@@ -94,6 +95,9 @@ class ReferenceHost:
 
         self.extensions: list[Extension[TestExtensionProtocol]] = []
         self._adapter_registered = False
+        self.sandbox_available = True
+        if sys.platform == "linux":
+            self.sandbox_available = detect_sandbox_capability().available
 
     def setup(self):
         """Initialize the host environment."""
@@ -163,6 +167,7 @@ class ReferenceHost:
             share_torch=share_torch,
             share_cuda_ipc=share_cuda,
             sandbox=sandbox_cfg,
+            sandbox_mode=SandboxMode.REQUIRED if self.sandbox_available else SandboxMode.DISABLED,
         )
 
         ext = Extension(

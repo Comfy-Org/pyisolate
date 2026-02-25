@@ -15,8 +15,8 @@ project = "pyisolate"
 copyright = "2026, Jacob Segal"
 author = "Jacob Segal"
 
-version = "0.9.0"
-release = "0.9.0"
+version = "0.9.1"
+release = "0.9.1"
 
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration

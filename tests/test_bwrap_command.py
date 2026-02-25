@@ -15,7 +15,14 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from pyisolate._internal.sandbox_detect import RestrictionModel
+
+pytestmark = pytest.mark.skipif(
+    sys.platform != "linux",
+    reason="bubblewrap command composition is Linux-specific",
+)
 
 
 def _mockbuild_bwrap_command(**kwargs: Any) -> list[str]:
