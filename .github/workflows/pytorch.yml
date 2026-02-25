@@ -41,7 +41,7 @@ jobs:
     - name: Run tests
       run: |
         source .venv/bin/activate
-        pytest tests/test_integration.py -v -k "torch"
+        pytest tests/integration_v2/test_tensors.py tests/test_torch_optional_contract.py tests/test_torch_utils_additional.py -v
 
     - name: Test example with PyTorch
       run: |
@@ -100,7 +100,7 @@ jobs:
     - name: Run tests
       run: |
         source .venv/bin/activate
-        pytest tests/test_integration.py -v -k "torch"
+        pytest tests/integration_v2/test_tensors.py tests/test_torch_optional_contract.py tests/test_torch_utils_additional.py -v
 
     - name: Test example with PyTorch
       run: |

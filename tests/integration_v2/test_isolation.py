@@ -1,7 +1,19 @@
 import os
+import sys
 import tempfile
 
 import pytest
+
+from pyisolate._internal.sandbox_detect import detect_sandbox_capability
+
+_SANDBOX_AVAILABLE = False
+if sys.platform == "linux":
+    _SANDBOX_AVAILABLE = detect_sandbox_capability().available
+
+pytestmark = pytest.mark.skipif(
+    not _SANDBOX_AVAILABLE,
+    reason="filesystem barrier checks require a working Linux bubblewrap sandbox",
+)
 
 
 @pytest.mark.asyncio

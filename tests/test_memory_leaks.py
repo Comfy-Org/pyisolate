@@ -94,11 +94,13 @@ class TestTensorKeeperCleanup:
             TensorKeeper,
             "__init__",
             lambda self, retention_seconds=2.0: (
-                setattr(self, "retention_seconds", 2.0),
-                setattr(self, "_keeper", __import__("collections").deque()),
-                setattr(self, "_lock", __import__("threading").Lock()),
-            )[-1]
-            or None,
+                (
+                    setattr(self, "retention_seconds", 2.0),
+                    setattr(self, "_keeper", __import__("collections").deque()),
+                    setattr(self, "_lock", __import__("threading").Lock()),
+                )[-1]
+                or None
+            ),
         )
 
     def test_tensor_keeper_keeps_reference(self):

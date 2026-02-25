@@ -173,9 +173,20 @@ def exclude_satisfied_requirements(
     """
     from packaging.requirements import Requirement
 
-    result = subprocess.run(  # noqa: S603  # Trusted: system pip executable
-        [str(python_exe), "-m", "pip", "list", "--format", "json"], capture_output=True, text=True, check=True
-    )
+    try:
+        result = subprocess.run(  # noqa: S603  # Trusted: system pip executable
+            [str(python_exe), "-m", "pip", "list", "--format", "json"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except subprocess.CalledProcessError as exc:
+        # Newer uv versions can create venvs without pip unless seeded.
+        # If pip is unavailable, skip filtering and install requested deps.
+        if "No module named pip" in (exc.stderr or ""):
+            logger.debug("pip unavailable in %s; skipping satisfied-requirement filter", python_exe)
+            return requirements
+        raise
     installed = {pkg["name"].lower(): pkg["version"] for pkg in json.loads(result.stdout)}
     torch_ecosystem = get_torch_ecosystem_packages()
 
@@ -227,6 +238,7 @@ def create_venv(venv_path: Path, config: ExtensionConfig) -> None:
                 uv_path,
                 "venv",
                 str(venv_path),
+                "--seed",
                 "--python",
                 sys.executable,
             ]
@@ -337,7 +349,34 @@ def install_dependencies(venv_path: Path, config: ExtensionConfig, name: str) ->
         except Exception as exc:
             logger.debug("Dependency cache read failed: %s", exc)
 
-    cmd = cmd_prefix + safe_deps + common_args
+    install_targets: list[str] = []
+    i = 0
+    while i < len(safe_deps):
+        dep = safe_deps[i]
+        dep_stripped = dep.strip()
+
+        # Support split editable args from existing callers:
+        # ["-e", "/path/to/pkg"].
+        if dep_stripped == "-e":
+            if i + 1 >= len(safe_deps):
+                raise ValueError("Editable dependency '-e' must include a path or URL")
+            editable_target = safe_deps[i + 1].strip()
+            if not editable_target:
+                raise ValueError("Editable dependency '-e' must include a path or URL")
+            install_targets.extend(["-e", editable_target])
+            i += 2
+            continue
+
+        if dep_stripped.startswith("-e "):
+            editable_target = dep_stripped[3:].strip()
+            if not editable_target:
+                raise ValueError("Editable dependency must include a path or URL after '-e'")
+            install_targets.extend(["-e", editable_target])
+        else:
+            install_targets.append(dep)
+        i += 1
+
+    cmd = cmd_prefix + install_targets + common_args
 
     with subprocess.Popen(  # noqa: S603  # Trusted: validated pip/uv install cmd
         cmd,

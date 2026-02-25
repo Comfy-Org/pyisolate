@@ -3,5 +3,6 @@ include README.md
 include pyproject.toml
 recursive-include pyisolate *.py
 recursive-include tests *.py
+prune tests/.test_temps
 recursive-exclude * __pycache__
 recursive-exclude * *.py[co]

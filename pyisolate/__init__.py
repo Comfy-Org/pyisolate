@@ -36,13 +36,14 @@ from typing import TYPE_CHECKING
 
 from ._internal.rpc_protocol import ProxiedSingleton, local_execution
 from ._internal.singleton_context import singleton_scope
+from ._internal.tensor_serializer import flush_tensor_keeper, purge_orphan_sender_shm_files
 from .config import ExtensionConfig, ExtensionManagerConfig, SandboxMode
 from .host import ExtensionBase, ExtensionManager
 
 if TYPE_CHECKING:
     from .interfaces import IsolationAdapter
 
-__version__ = "0.9.0"
+__version__ = "0.9.1"
 
 __all__ = [
     "ExtensionBase",
@@ -53,6 +54,8 @@ __all__ = [
     "ProxiedSingleton",
     "local_execution",
     "singleton_scope",
+    "flush_tensor_keeper",
+    "purge_orphan_sender_shm_files",
     "register_adapter",
     "get_adapter",
 ]

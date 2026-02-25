@@ -233,6 +233,16 @@ class JSONSocketTransport:
         if isinstance(obj, uuid.UUID):
             return str(obj)
 
+        # Handle RemoteObjectHandle explicitly to avoid generic __dict__ fallback.
+        from .remote_handle import RemoteObjectHandle
+
+        if isinstance(obj, RemoteObjectHandle):
+            return {
+                "__type__": "RemoteObjectHandle",
+                "object_id": obj.object_id,
+                "type_name": obj.type_name,
+            }
+
         # Handle PyTorch tensors BEFORE __dict__ check (tensors have __dict__ but shouldn't use it)
         try:
             import torch
@@ -244,8 +254,27 @@ class JSONSocketTransport:
         except ImportError:
             pass
 
+        # Check SerializerRegistry for registered type handlers (exact + MRO).
+        # This lets base-class serializers intercept before the generic __dict__ fallback.
+        from .serialization_registry import SerializerRegistry
+
+        registry = SerializerRegistry.get_instance()
+        for klass in type(obj).__mro__:
+            if klass is object:
+                continue
+            for type_key in (f"{klass.__module__}.{klass.__name__}", klass.__name__):
+                serializer = registry.get_serializer(type_key)
+                if serializer:
+                    return serializer(obj)
+
         # Handle objects with __dict__ (preserve full state)
         if hasattr(obj, "__dict__") and not callable(obj):
+            type_key = f"{type(obj).__module__}.{type(obj).__name__}"
+            logger.warning(
+                "⚠️  GENERIC SERIALIZER USED ⚠️  Serializing %s via __dict__ fallback. "
+                "This is a SECURITY RISK and will be removed. Register a proper serializer!",
+                type_key,
+            )
             try:
                 # Recursively serialize __dict__ contents AND class attributes
                 serialized_dict = {}
@@ -315,6 +344,12 @@ class JSONSocketTransport:
 
             return base64.b64decode(dct["data"])
 
+        # Reconstruct remote object handles.
+        if dct.get("__type__") == "RemoteObjectHandle":
+            from .remote_handle import RemoteObjectHandle
+
+            return RemoteObjectHandle(dct["object_id"], dct["type_name"])
+
         # Generic Registry Lookup for __type__
         if "__type__" in dct:
             type_name = dct["__type__"]
@@ -373,6 +408,12 @@ class JSONSocketTransport:
             data = dct.get("data", {})
             module_name = dct.get("module")
             type_name = dct.get("type")
+            type_key = f"{module_name}.{type_name}"
+            logger.warning(
+                "⚠️  GENERIC DESERIALIZER USED ⚠️  Deserializing %s via __pyisolate_object__. "
+                "This is a SECURITY RISK and will be removed. Register a proper deserializer!",
+                type_key,
+            )
 
             # Try to reconstruct the original class
             if module_name and type_name:

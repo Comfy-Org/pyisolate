@@ -36,23 +36,22 @@ def serialize_for_isolation(data: Any) -> Any:
     """
     type_name = type(data).__name__
 
-    # If this object originated as a RemoteObjectHandle, prefer to send the
-    # handle back to the isolated process rather than attempting to pickle the
-    # concrete instance. This preserves identity (and avoids pickling large or
-    # unpicklable objects) while still allowing host-side consumers to interact
-    # with the resolved object.
-    from .remote_handle import RemoteObjectHandle
-
-    handle = getattr(data, "_pyisolate_remote_handle", None)
-    if isinstance(handle, RemoteObjectHandle):
-        return handle
-
     # Adapter-registered serializers take precedence over built-in handlers
     registry = SerializerRegistry.get_instance()
     if registry.has_handler(type_name):
         serializer = registry.get_serializer(type_name)
         if serializer:
             return serializer(data)
+
+    # If this object originated as a RemoteObjectHandle, send the original
+    # handle only when no adapter serializer is available for this type.
+    # This avoids cross-extension stale handle reuse for serializer-backed
+    # objects (e.g. CLIP/ModelPatcher/VAE refs).
+    from .remote_handle import RemoteObjectHandle
+
+    handle = getattr(data, "_pyisolate_remote_handle", None)
+    if isinstance(handle, RemoteObjectHandle):
+        return handle
 
     torch, _ = get_torch_optional()
     if torch is not None and isinstance(data, torch.Tensor):

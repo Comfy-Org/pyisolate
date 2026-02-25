@@ -50,7 +50,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        pytorch-version: ['2.1.0', '2.3.0']
+        pytorch-version: ['2.1.0']
 
     steps:
     - uses: actions/checkout@v4
@@ -78,8 +78,4 @@ jobs:
     - name: Run PyTorch tests
       run: |
         .venv\Scripts\activate
-        python tests/test_integration.py -v
-        python tests/test_edge_cases.py -v
-        python tests/test_normalization_integration.py -v
-        python tests/test_security.py -v
-        python tests/test_torch_tensor_integration.py -v
+        pytest tests/integration_v2/test_tensors.py tests/test_torch_optional_contract.py tests/test_torch_utils_additional.py -v

@@ -239,10 +239,10 @@ async def _async_uds_entrypoint(
         except asyncio.CancelledError:
             pass
         except Exception as exc:
-            logger.error(
-                "Extension module loading/execution failed for %s: %s", module_path, exc, exc_info=True
-            )
-            raise
+            # Keep RPC alive so the host can gracefully skip broken extensions
+            # instead of seeing a connection-reset hard failure.
+            logger.warning("Extension module loading/execution failed for %s: %s", module_path, exc)
+            await rpc.run_until_stopped()
 
 
 if __name__ == "__main__":

@@ -29,6 +29,7 @@ SANDBOX_SYSTEM_PATHS: list[str] = [
     "/lib32",  # 32-bit libraries (if exists)
     "/bin",  # Essential binaries
     "/sbin",  # System binaries
+    "/opt",  # Hosted toolcache interpreters (e.g., GitHub Actions setup-python)
     "/etc/alternatives",  # Symlink management
     "/etc/ld.so.cache",  # Dynamic linker cache
     "/etc/ld.so.conf",  # Dynamic linker config

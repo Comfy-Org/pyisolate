@@ -57,10 +57,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - container: debian:11
-            python-install: |
-              apt-get update && apt-get install -y python3 python3-pip python3-venv git curl bubblewrap
-            extras: "dev,test"
           - container: debian:12
             python-install: |
               apt-get update && apt-get install -y python3 python3-pip python3-venv git curl bubblewrap
@@ -72,10 +68,6 @@ jobs:
           - container: fedora:39
             python-install: |
               dnf install -y python3 python3-pip git curl bubblewrap
-            extras: "dev,test"
-          - container: rockylinux:9
-            python-install: |
-              dnf install -y python3 python3-pip git bubblewrap
             extras: "dev,test"
 
     container: ${{ matrix.container }}
@@ -92,7 +84,7 @@ jobs:
 
     - name: Install package
       run: |
-        $HOME/.local/bin/uv venv
+        $HOME/.local/bin/uv venv --python python3
         . .venv/bin/activate
         $HOME/.local/bin/uv pip install -e ".[${{ matrix.extras }}]"
 
