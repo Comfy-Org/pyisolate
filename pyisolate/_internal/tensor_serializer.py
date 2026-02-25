@@ -1,7 +1,9 @@
+import atexit
 import base64
 import collections
 import logging
 import os
+import signal
 import threading
 import time
 from pathlib import Path
@@ -92,7 +94,7 @@ class TensorKeeper:
 
     dest = ("TensorKeeper",)
 
-    def __init__(self, retention_seconds: float = 30.0):  # Increase for slow test env
+    def __init__(self, retention_seconds: float = 5.0):
         self.retention_seconds = retention_seconds
         self._keeper: collections.deque = collections.deque()
         self._lock = threading.Lock()
@@ -114,8 +116,115 @@ class TensorKeeper:
                 else:
                     break
 
+    def flush(self) -> int:
+        """Release all currently held tensor references immediately."""
+        with self._lock:
+            count = len(self._keeper)
+            self._keeper.clear()
+            return count
+
 
 _tensor_keeper = TensorKeeper()
+
+
+def _flush_reduction_shared_cache(reductions: Any) -> None:
+    shared_cache = getattr(reductions, "shared_cache", None)
+    if shared_cache is None:
+        return
+
+    try:
+        free_dead = getattr(shared_cache, "free_dead_references", None)
+        if callable(free_dead):
+            free_dead()
+        clear_fn = getattr(shared_cache, "clear", None)
+        if callable(clear_fn):
+            clear_fn()
+    except Exception:
+        logger.debug("TensorKeeper flush: failed to purge shared_cache", exc_info=True)
+
+
+def _flush_cuda_ipc(torch: Any) -> None:
+    try:
+        if torch.cuda.is_available() and torch.cuda.is_initialized():
+            torch.cuda.ipc_collect()
+    except Exception:
+        logger.debug("TensorKeeper flush: cuda ipc_collect failed", exc_info=True)
+
+
+def flush_tensor_keeper() -> int:
+    """Release all tensors held by TensorKeeper and return the release count."""
+    released = _tensor_keeper.flush()
+    try:
+        torch, reductions = require_torch("flush_tensor_keeper")
+    except Exception:
+        return released
+
+    _flush_reduction_shared_cache(reductions)
+    _flush_cuda_ipc(torch)
+    return released
+
+
+def purge_orphan_sender_shm_files(min_age_seconds: float = 1.0, force: bool = False) -> int:
+    """Best-effort unlink of stale sender-side torch_* shm files for this PID.
+
+    Guarded by PYISOLATE_PURGE_SENDER_SHM=1 to keep default behavior unchanged.
+    """
+    if not force and os.environ.get("PYISOLATE_PURGE_SENDER_SHM", "0") != "1":
+        return 0
+
+    shm_root = Path("/dev/shm")
+    if not shm_root.exists():
+        return 0
+
+    now = time.time()
+    prefix = f"torch_{os.getpid()}_"
+    removed = 0
+    for path in shm_root.glob(f"{prefix}*"):
+        try:
+            if min_age_seconds > 0:
+                mtime = path.stat().st_mtime
+                if (now - mtime) < min_age_seconds:
+                    continue
+            path.unlink()
+            removed += 1
+        except FileNotFoundError:
+            continue
+        except Exception:
+            logger.debug("Failed to purge stale SHM file %s", path, exc_info=True)
+    return removed
+
+
+def _flush_tensor_keeper_on_exit() -> None:
+    try:
+        flush_tensor_keeper()
+        purge_orphan_sender_shm_files(min_age_seconds=0.0, force=True)
+    except Exception:
+        # Best-effort shutdown cleanup.
+        pass
+
+
+atexit.register(_flush_tensor_keeper_on_exit)
+
+
+def _install_signal_cleanup_handlers() -> None:
+    """Optional signal cleanup for harnesses that terminate via SIGHUP/SIGTERM."""
+    if os.environ.get("PYISOLATE_SIGNAL_CLEANUP", "0") != "1":
+        return
+
+    def _handler(signum: int, _frame: Any) -> None:
+        try:
+            _flush_tensor_keeper_on_exit()
+        finally:
+            os._exit(128 + signum)
+
+    for sig in (signal.SIGHUP, signal.SIGTERM):
+        try:
+            signal.signal(sig, _handler)
+        except Exception:
+            logger.debug("Failed to install signal cleanup handler for %s", sig, exc_info=True)
+
+
+_install_signal_cleanup_handlers()
 
 
 def serialize_tensor(t: Any) -> dict[str, Any]:
@@ -133,6 +242,14 @@ def _serialize_cpu_tensor(t: Any) -> dict[str, Any]:
     may be reduced.
     """
     torch, reductions = require_torch("CPU tensor serialization")
+
+    # Keep strategy pinned to file_system for JSON-RPC transfer paths.
+    # A fallback from file_descriptor -> file_system can leave behind SHM refs.
+    try:
+        if torch.multiprocessing.get_sharing_strategy() != "file_system":
+            torch.multiprocessing.set_sharing_strategy("file_system")
+    except Exception:
+        logger.debug("Failed to enforce file_system sharing strategy", exc_info=True)
 
     # Check /dev/shm availability (cached after first check)
     _check_shm_availability()
@@ -163,11 +280,17 @@ def _serialize_cpu_tensor(t: Any) -> dict[str, Any]:
     sfunc, sargs = reductions.reduce_storage(storage)
 
     if sfunc.__name__ == "rebuild_storage_filename":
+        use_borrowed = os.environ.get("PYISOLATE_CPU_BORROWED_SHM", "1") == "1"
+        strategy = "file_system_borrowed" if use_borrowed else "file_system"
+        if use_borrowed:
+            # reduce_storage() increments sender-side refcount for transfer.
+            # Undo transit incref immediately and use borrowed strategy payload.
+            storage._shared_decref()
         # sargs: (cls, manager_path, storage_key, size)
         return {
             "__type__": "TensorRef",
             "device": "cpu",
-            "strategy": "file_system",
+            "strategy": strategy,
             "manager_path": sargs[1].decode("utf-8"),
             "storage_key": sargs[2].decode("utf-8"),
             "storage_size": sargs[3],
@@ -267,17 +390,25 @@ def _deserialize_legacy_tensor(data: dict[str, Any]) -> Any:
     dtype = getattr(torch, dtype_str.split(".")[-1])
 
     if device == "cpu":
-        if data.get("strategy") != "file_system":
-            raise RuntimeError(f"Unsupported CPU strategy: {data.get('strategy')}")
+        strategy = data.get("strategy")
+        if strategy not in ("file_system", "file_system_borrowed"):
+            raise RuntimeError(f"Unsupported CPU strategy: {strategy}")
 
         manager_path = data["manager_path"].encode("utf-8")
         storage_key = data["storage_key"].encode("utf-8")
         storage_size = data["storage_size"]
 
-        # Rebuild UntypedStorage (no dtype arg)
-        rebuilt_storage = reductions.rebuild_storage_filename(
-            torch.UntypedStorage, manager_path, storage_key, storage_size
-        )
+        if strategy == "file_system_borrowed":
+            # Rebuild directly without caching the borrowed storage handle in shared_cache.
+            # Keeping borrowed refs in the global cache can pin SHM entries longer than needed.
+            rebuilt_storage = torch.UntypedStorage._new_shared_filename_cpu(
+                manager_path, storage_key, storage_size
+            )
+        else:
+            # Legacy path for backward compatibility with old strategy payloads.
+            rebuilt_storage = reductions.rebuild_storage_filename(
+                torch.UntypedStorage, manager_path, storage_key, storage_size
+            )
 
         # Wrap in TypedStorage (required by rebuild_tensor)
         typed_storage = torch.storage.TypedStorage(wrap_storage=rebuilt_storage, dtype=dtype, _internal=True)
@@ -293,6 +424,13 @@ def _deserialize_legacy_tensor(data: dict[str, Any]) -> Any:
         cpu_tensor: Any = reductions.rebuild_tensor(  # type: ignore[assignment]
             torch.Tensor, typed_storage, metadata
         )
+        # Diagnostic toggle: copy CPU tensors out of shared storage immediately.
+        # If this removes residual SHM files, the remaining leak is receiver-lifetime related.
+        if os.environ.get("PYISOLATE_CPU_TENSOR_FORCE_CLONE_ON_DESERIALIZE", "0") == "1":
+            cloned_tensor = cpu_tensor.clone()
+            if data["requires_grad"]:
+                cloned_tensor.requires_grad_(True)
+            cpu_tensor = cloned_tensor
         return cpu_tensor
 
     elif device == "cuda":
