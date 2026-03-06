@@ -14,7 +14,8 @@ authors = [
     {name = "Jacob Segal", email = "jacob.e.segal@gmail.com"},
 ]
 maintainers = [
-    {name = "Jacob Segal", email = "jacob.e.segal@gmail.com"},
+  {name = "Jacob Segal", email = "jacob.e.segal@gmail.com"},
+  {name = "John Pollock", email = "pollockjj@gmail.com"},
 ]
 classifiers = [
     "Development Status :: 3 - Alpha",
@@ -28,6 +29,7 @@ keywords = ["virtual environment", "venv", "development"]
 dependencies = [
     "uv>=0.1.0",
     "tomli>=2.0.1; python_version < '3.11'",
+    "packaging>=23.0",
 ]
 
 [project.optional-dependencies]

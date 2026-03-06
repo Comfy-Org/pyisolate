@@ -8,13 +8,13 @@ with varying numbers of extensions and different tensor sharing configurations.
 
 import argparse
 import asyncio
+import contextlib
 import gc
 import platform
 import sys
 import time
-import os
 from pathlib import Path
-from typing import Optional
+from shutil import which
 
 import psutil
 
@@ -44,15 +44,11 @@ except ImportError:
     nvml = None
     NVML_AVAILABLE = False
 
-import contextlib
-import tempfile
-import shutil
+from benchmark_harness import BenchmarkHarness  # noqa: E402
+from memory_extension_base import MemoryBenchmarkExtensionBase  # noqa: E402
+from tabulate import tabulate  # noqa: E402
 
-from memory_extension_base import MemoryBenchmarkExtensionBase
-from benchmark_harness import BenchmarkHarness
-from tabulate import tabulate
-
-from pyisolate import ExtensionConfig, ExtensionManager, ExtensionManagerConfig
+from pyisolate import ExtensionConfig, ExtensionManager, ExtensionManagerConfig  # noqa: E402
 
 
 class MemoryTracker:
@@ -89,14 +85,13 @@ class MemoryTracker:
                 self.baseline_gpu_memory_mb = baseline
                 print(f"Using nvidia-smi fallback. Initial GPU memory: {baseline:.1f} MB")
 
-    def _get_gpu_memory_nvidia_smi(self) -> Optional[float]:
+    def _get_gpu_memory_nvidia_smi(self) -> float | None:
         """Get GPU memory usage using nvidia-smi command (Windows fallback)."""
         try:
-            import shutil
             import subprocess
 
             # Find nvidia-smi executable
-            nvidia_smi = shutil.which("nvidia-smi")
+            nvidia_smi = which("nvidia-smi")
             if not nvidia_smi:
                 return None
 
@@ -126,10 +121,9 @@ class MemoryTracker:
 
             # Try to get total GPU memory
             try:
-                import shutil
                 import subprocess
 
-                nvidia_smi = shutil.which("nvidia-smi")
+                nvidia_smi = which("nvidia-smi")
                 if nvidia_smi:
                     result = subprocess.run(  # noqa: S603
                         [nvidia_smi, "--query-gpu=memory.total", "--format=csv,nounits,noheader"],
@@ -331,6 +325,7 @@ def memory_benchmark_entrypoint():
 '''
 
 
+class MemoryBenchmarkRunner:
     """Runs memory usage benchmarks with multiple extensions."""
 
     def __init__(self, test_base: BenchmarkHarness):

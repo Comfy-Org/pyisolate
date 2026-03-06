@@ -12,9 +12,14 @@ from contextlib import contextmanager
 from importlib import metadata as importlib_metadata
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 from ..config import ExtensionConfig
 from ..path_helpers import serialize_host_snapshot
+from .cuda_wheels import (
+    get_cuda_wheel_runtime_descriptor,
+    resolve_cuda_wheel_requirements,
+)
 from .torch_utils import get_torch_ecosystem_packages
 
 logger = logging.getLogger(__name__)
@@ -306,6 +311,26 @@ def install_dependencies(venv_path: Path, config: ExtensionConfig, name: str) ->
     if not safe_deps:
         return
 
+    cuda_wheels_config = config.get("cuda_wheels")
+    cuda_wheel_runtime: dict[str, object] | None = None
+    if cuda_wheels_config:
+        from packaging.requirements import InvalidRequirement, Requirement
+        from packaging.utils import canonicalize_name
+
+        cuda_pkg_names = {canonicalize_name(p) for p in cuda_wheels_config.get("packages", [])}
+        needs_cuda_probe = False
+        for dep in safe_deps:
+            if dep.startswith("-e"):
+                continue
+            try:
+                if canonicalize_name(Requirement(dep).name) in cuda_pkg_names:
+                    needs_cuda_probe = True
+                    break
+            except InvalidRequirement:
+                continue
+        if needs_cuda_probe:
+            cuda_wheel_runtime = get_cuda_wheel_runtime_descriptor()
+
     # uv handles hardlink vs copy automatically based on filesystem support
     cmd_prefix: list[str] = [uv_path, "pip", "install", "--python", str(python_exe)]
     cache_dir_override = os.environ.get("PYISOLATE_UV_CACHE_DIR")
@@ -335,6 +360,8 @@ def install_dependencies(venv_path: Path, config: ExtensionConfig, name: str) ->
         "dependencies": safe_deps,
         "share_torch": config["share_torch"],
         "torch_spec": torch_spec,
+        "cuda_wheels": cuda_wheels_config,
+        "cuda_wheel_runtime": cuda_wheel_runtime,
         "pyisolate": pyisolate_version,
         "python": sys.version,
     }
@@ -349,18 +376,32 @@ def install_dependencies(venv_path: Path, config: ExtensionConfig, name: str) ->
         except Exception as exc:
             logger.debug("Dependency cache read failed: %s", exc)
 
+    resolved_deps = safe_deps
+    if cuda_wheels_config:
+        resolved_deps = resolve_cuda_wheel_requirements(safe_deps, cuda_wheels_config)
+        for original_dep, resolved_dep in zip(safe_deps, resolved_deps, strict=True):
+            if original_dep != resolved_dep:
+                parsed = urlparse(resolved_dep)
+                redacted = f"{parsed.netloc}/{Path(parsed.path).name}" if parsed.scheme else resolved_dep
+                logger.info(
+                    "][ CUDA_WHEEL_RESOLVED ext=%s dep=%s wheel=%s",
+                    name,
+                    original_dep,
+                    redacted,
+                )
+
     install_targets: list[str] = []
     i = 0
-    while i < len(safe_deps):
-        dep = safe_deps[i]
+    while i < len(resolved_deps):
+        dep = resolved_deps[i]
         dep_stripped = dep.strip()
 
         # Support split editable args from existing callers:
         # ["-e", "/path/to/pkg"].
         if dep_stripped == "-e":
-            if i + 1 >= len(safe_deps):
+            if i + 1 >= len(resolved_deps):
                 raise ValueError("Editable dependency '-e' must include a path or URL")
-            editable_target = safe_deps[i + 1].strip()
+            editable_target = resolved_deps[i + 1].strip()
             if not editable_target:
                 raise ValueError("Editable dependency '-e' must include a path or URL")
             install_targets.extend(["-e", editable_target])
@@ -375,6 +416,17 @@ def install_dependencies(venv_path: Path, config: ExtensionConfig, name: str) ->
         else:
             install_targets.append(dep)
         i += 1
+
+    if cuda_wheels_config:
+        redacted_targets = [
+            f"{urlparse(t).netloc}/{Path(urlparse(t).path).name}" if "://" in t else t
+            for t in install_targets
+        ]
+        logger.info(
+            "][ CUDA_WHEEL_INSTALL ext=%s targets=%s",
+            name,
+            redacted_targets,
+        )
 
     cmd = cmd_prefix + install_targets + common_args
 
@@ -394,6 +446,8 @@ def install_dependencies(venv_path: Path, config: ExtensionConfig, name: str) ->
             # for users debugging their own extension dependencies.
             if "pyisolate==" not in clean and "pyisolate @" not in clean:
                 output_lines.append(clean)
+                if cuda_wheels_config and clean:
+                    logger.info("][ CUDA_WHEEL_UV ext=%s %s", name, clean)
         return_code = proc.wait()
 
     if return_code != 0:

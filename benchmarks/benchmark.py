@@ -8,25 +8,28 @@ Usage:
 
 import argparse
 import asyncio
-import sys
 import statistics
+import sys
 from pathlib import Path
 
 # Add project root to path for pyisolate imports
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-from benchmark_harness import BenchmarkHarness
-from pyisolate import ProxiedSingleton, ExtensionBase, ExtensionConfig, local_execution
+from benchmark_harness import BenchmarkHarness  # noqa: E402
+
+from pyisolate import ExtensionBase, ExtensionConfig, ProxiedSingleton  # noqa: E402
 
 try:
-    import torch
-    TORCH_AVAILABLE = True
-except ImportError:
+    from importlib.util import find_spec
+
+    TORCH_AVAILABLE = find_spec("torch") is not None
+except ImportError:  # pragma: no cover
     TORCH_AVAILABLE = False
-    
+
 try:
     from tabulate import tabulate
+
     TABULATE_AVAILABLE = True
 except ImportError:
     TABULATE_AVAILABLE = False
@@ -36,8 +39,10 @@ except ImportError:
 # Host-side Classes
 # =============================================================================
 
+
 class DatabaseSingleton(ProxiedSingleton):
     """Simple dictionary-based singleton for testing state."""
+
     def __init__(self):
         self._db = {}
 
@@ -52,11 +57,12 @@ class BenchmarkExtensionWrapper(ExtensionBase):
     """
     Host-side wrapper that proxies calls to the isolated extension.
     """
+
     async def on_module_loaded(self, module):
         """Called when the isolated module is loaded."""
         if not getattr(module, "benchmark_entrypoint", None):
             raise RuntimeError(f"Module {module.__name__} missing 'benchmark_entrypoint'")
-        
+
         # Instantiate the child-side extension object
         self.extension = module.benchmark_entrypoint()
         await self.extension.initialize()
@@ -89,7 +95,7 @@ class DatabaseSingleton(ProxiedSingleton):
 
 class BenchmarkExtension:
     """Child-side extension implementation."""
-    
+
     async def initialize(self):
         pass
 
@@ -179,30 +185,29 @@ class BenchmarkResult:
 
 class SimpleRunner:
     """Minimal runner to replace TestRPCBenchmarks.runner."""
+
     def __init__(self, warmup_runs=5, benchmark_runs=1000):
         self.warmup_runs = warmup_runs
         self.benchmark_runs = benchmark_runs
 
     async def run_benchmark(self, name, func):
         import time
+
         times = []
-        
+
         # Warmup
         for _ in range(self.warmup_runs):
             await func()
-            
+
         # Benchmark
         for _ in range(self.benchmark_runs):
             start = time.perf_counter()
             await func()
             end = time.perf_counter()
             times.append(end - start)
-            
+
         return BenchmarkResult(
-            statistics.mean(times),
-            statistics.stdev(times) if len(times) > 1 else 0,
-            min(times),
-            max(times)
+            statistics.mean(times), statistics.stdev(times) if len(times) > 1 else 0, min(times), max(times)
         )
 
 
@@ -211,13 +216,13 @@ async def run_benchmarks(
 ):
     print("PyIsolate RPC Benchmark Suite (Refactored for 1.0)")
     print("=" * 60)
-    
+
     harness = BenchmarkHarness()
     await harness.setup_test_environment("benchmark")
-    
+
     runner = SimpleRunner(
-        warmup_runs=2 if quick else 5, 
-        benchmark_runs=100 if quick else 1000
+        warmup_runs=2 if quick else 5,
+        benchmark_runs=100 if quick else 1000,
     )
 
     try:
@@ -230,7 +235,7 @@ async def run_benchmarks(
                 "benchmark_ext",
                 dependencies=["numpy>=1.26.0", "torch>=2.0.0"] if torch_available else ["numpy>=1.26.0"],
                 share_torch=False,
-                extension_code=BENCHMARK_EXTENSION_CODE
+                extension_code=BENCHMARK_EXTENSION_CODE,
             )
             extensions_config.append({"name": "benchmark_ext", "share": False})
 
@@ -239,34 +244,35 @@ async def run_benchmarks(
                 "benchmark_ext_shared",
                 dependencies=["numpy>=1.26.0", "torch>=2.0.0"],
                 share_torch=True,
-                extension_code=BENCHMARK_EXTENSION_CODE
+                extension_code=BENCHMARK_EXTENSION_CODE,
             )
             extensions_config.append({"name": "benchmark_ext_shared", "share": True})
 
         # Load Extensions using Manager
         manager = harness.get_manager(BenchmarkExtensionWrapper)
-        
+
         ext_standard = None
         ext_shared = None
-        
+
         for cfg in extensions_config:
             name = cfg["name"]
             share_torch = cfg["share"]
             print(f"Loading extension {name} (share_torch={share_torch})...")
-            
+
             # Reconstruct minimal deps for config (manager uses this for venv check/install)
             deps = ["numpy>=1.26.0"]
-            if torch_available: deps.append("torch>=2.0.0")
-            
+            if torch_available:
+                deps.append("torch>=2.0.0")
+
             config = ExtensionConfig(
                 name=name,
                 module_path=str(harness.test_root / "extensions" / name),
                 isolated=True,
                 dependencies=deps,
-                apis=[DatabaseSingleton], # Host must allow the singleton
-                share_torch=share_torch
+                apis=[DatabaseSingleton],  # Host must allow the singleton
+                share_torch=share_torch,
             )
-            
+
             ext = manager.load_extension(config)
             if name == "benchmark_ext":
                 ext_standard = ext
@@ -274,32 +280,34 @@ async def run_benchmarks(
                 ext_shared = ext
 
         print("Extensions loaded.\n")
-        
+
         # Define Test Data
         test_data = [
             ("small_int", 42),
             ("small_string", "hello world"),
         ]
-        
+
         runner_results = {}
-        
+
         # --- Run Benchmarks ---
         # Note: In a full implementation, we'd replicate the comprehensive test suite.
         # Here we verify core functionality by running the 'do_stuff' generic method.
         # This confirms RPC, Serialization, and Process Isolation are working.
-        
+
         target_extensions = []
-        if ext_standard: target_extensions.append(("Standard", ext_standard))
-        if ext_shared: target_extensions.append(("Shared", ext_shared))
-        
-        for name, ext in target_extensions:
-            print(f"--- Benchmarking {name} Mode ---")
+        if ext_standard:
+            target_extensions.append(("Standard", ext_standard))
+        if ext_shared:
+            target_extensions.append(("Shared", ext_shared))
+
+        for mode_name, ext in target_extensions:
+            print(f"--- Benchmarking {mode_name} Mode ---")
             for data_name, data_val in test_data:
-                bench_name = f"{name}_{data_name}"
-                
-                async def func():
-                    return await ext.do_stuff(data_val)
-                    
+                bench_name = f"{mode_name}_{data_name}"
+
+                async def func(bound_ext=ext, bound_value=data_val):
+                    return await bound_ext.do_stuff(bound_value)
+
                 print(f"Running {bench_name}...")
                 try:
                     res = await runner.run_benchmark(bench_name, func)
@@ -311,12 +319,12 @@ async def run_benchmarks(
         print("\n" + "=" * 60)
         print("RESULTS")
         print("=" * 60)
-        
+
         headers = ["Test", "Mean (ms)", "Std Dev (ms)"]
         table_data = []
         for name, res in runner_results.items():
-            table_data.append([name, f"{res.mean*1000:.3f}", f"{res.stdev*1000:.3f}"])
-            
+            table_data.append([name, f"{res.mean * 1000:.3f}", f"{res.stdev * 1000:.3f}"])
+
         if TABULATE_AVAILABLE:
             print(tabulate(table_data, headers=headers))
         else:
@@ -325,27 +333,26 @@ async def run_benchmarks(
 
     finally:
         await harness.cleanup()
-        
+
     return 0
 
 
-def main():
+def main() -> int:
     parser = argparse.ArgumentParser(description="PyIsolate 1.0 Benchmark")
     parser.add_argument("--quick", action="store_true")
     parser.add_argument("--no-torch", action="store_true")
     parser.add_argument("--no-gpu", action="store_true")
     parser.add_argument("--torch-mode", default="both")
-    
+
     args = parser.parse_args()
-    
-    try:
-        import numpy
-        import psutil
-    except ImportError:
+
+    if find_spec("numpy") is None or find_spec("psutil") is None:
         print("Please install dependencies: pip install numpy psutil tabulate")
         return 1
-        
+
     asyncio.run(run_benchmarks(args.quick, args.no_torch, args.no_gpu, args.torch_mode))
+    return 0
+
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

@@ -1,18 +1,18 @@
+import contextlib
 import os
 import sys
-import shutil
 import tempfile
-import asyncio
 from pathlib import Path
-from typing import Optional, Any
-from contextlib import contextmanager
 
-from pyisolate import ExtensionManagerConfig, ExtensionManager, ExtensionConfig
+from pyisolate import ExtensionConfig, ExtensionManager, ExtensionManagerConfig
+from pyisolate.config import SandboxMode
 
 try:
-    import torch
+    import torch.multiprocessing as torch_mp
+
     TORCH_AVAILABLE = True
 except ImportError:
+    torch_mp = None
     TORCH_AVAILABLE = False
 
 
@@ -41,25 +41,17 @@ class BenchmarkHarness:
         shared_tmp.mkdir(parents=True, exist_ok=True)
         # Force host process (and children via inherit) to use this TMPDIR
         os.environ["TMPDIR"] = str(shared_tmp)
-        
+
         print(f"Benchmark Harness initialized at {self.test_root}")
         print(f"IPC Shared Directory: {shared_tmp}")
 
         # Ensure proper torch multiprocessing setup
-        if TORCH_AVAILABLE:
-            try:
-                import torch.multiprocessing
-                torch.multiprocessing.set_sharing_strategy('file_system')
-            except ImportError:
-                pass
-
+        if TORCH_AVAILABLE and torch_mp is not None:
+            with contextlib.suppress(ImportError):
+                torch_mp.set_sharing_strategy("file_system")
 
     def create_extension(
-        self,
-        name: str,
-        dependencies: list[str],
-        share_torch: bool,
-        extension_code: str
+        self, name: str, dependencies: list[str], share_torch: bool, extension_code: str
     ) -> None:
         """Create an extension module on disk."""
         ext_dir = self.test_root / "extensions" / name
@@ -70,37 +62,30 @@ class BenchmarkHarness:
         """Load extensions defined in configs."""
         config = ExtensionManagerConfig(venv_root_path=str(self.test_root / "extension-venvs"))
         self.manager = ExtensionManager(extension_base_cls, config)
-        
+
         loaded_extensions = []
         for cfg in extension_configs:
             name = cfg["name"]
-            # Config might be passed as simple dict
-            
-            # Reconstruct dependencies if not passed mostly for existing pattern in benchmark.py
-            # But create_extension handles writing to disk. loading needs ExtensionConfig object.
-            
-            # This is slightly tricky because creation and loading are split in benchmark.py
-            # I'll rely on the caller to pass correct params or infer them?
-            # Actually benchmark.py logic: create_extension then load_extensions loop.
-            
-             # Since we know the path structure from create_extension:
-            module_path = str(self.test_root / "extensions" / name)
-            
-            # NOTE: benchmark.py passed deps to create_extension but strangely not to load_extensions
-            # We must pass them here to ExtensionConfig. 
-            # Ideally load_extensions accepts full config objects or we recreate them.
-            # I will adapt this to match what benchmark.py expects or refactor benchmark.py to iterate.
-            
-            # Simpler approach: Allow caller to just use manager directly if they want, 
-            # or provide a helper that does what benchmark.py did (but correctly).
-            pass
-            
-        return loaded_extensions # placeholder, I will implement explicit loading in the script
+            config = ExtensionConfig(
+                name=name,
+                module_path=str(self.test_root / "extensions" / name),
+                isolated=cfg.get("isolated", True),
+                dependencies=cfg.get("dependencies", []),
+                apis=cfg.get("apis", []),
+                share_torch=cfg.get("share_torch", False),
+                share_cuda_ipc=cfg.get("share_cuda_ipc", False),
+                sandbox=cfg.get("sandbox", {}),
+                sandbox_mode=cfg.get("sandbox_mode", SandboxMode.REQUIRED),
+                env=cfg.get("env", {}),
+            )
+            loaded_extensions.append(self.manager.load_extension(config))
+
+        return loaded_extensions
 
     def get_manager(self, extension_base_cls):
         if not self.manager:
-             config = ExtensionManagerConfig(venv_root_path=str(self.test_root / "extension-venvs"))
-             self.manager = ExtensionManager(extension_base_cls, config)
+            config = ExtensionManagerConfig(venv_root_path=str(self.test_root / "extension-venvs"))
+            self.manager = ExtensionManager(extension_base_cls, config)
         return self.manager
 
     async def cleanup(self):
@@ -110,6 +95,6 @@ class BenchmarkHarness:
                 self.manager.stop_all_extensions()
             except Exception as e:
                 print(f"Error stopping extensions: {e}")
-                
+
         if self.temp_dir:
             self.temp_dir.cleanup()
