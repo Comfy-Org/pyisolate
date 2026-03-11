@@ -87,6 +87,8 @@ async def deserialize_from_isolation(data: Any, extension: Any = None, _nested: 
     if isinstance(data, RemoteObjectHandle):
         if _nested or extension is None:
             return data
+        if registry.has_handler(data.type_name):
+            return data
         try:
             resolved = await extension.get_remote_object(data.object_id)
             with contextlib.suppress(Exception):
@@ -95,11 +97,13 @@ async def deserialize_from_isolation(data: Any, extension: Any = None, _nested: 
         except Exception:
             return data
 
-    # Check for adapter-registered deserializers by type name (e.g., NodeOutput)
-    if registry.has_handler(type_name):
+    # Check for adapter-registered deserializers by type name (e.g., NodeOutput).
+    # Only apply to dicts (serialized form). Objects already deserialized by the
+    # JSON transport layer (e.g., PLY reconstructed via _json_object_hook) are
+    # passed through as-is.
+    if isinstance(data, dict) and registry.has_handler(type_name):
         deserializer = registry.get_deserializer(type_name)
         if deserializer:
-            # For async deserializers, we need special handling
             result = deserializer(data)
             if hasattr(result, "__await__"):
                 return await result

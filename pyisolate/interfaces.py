@@ -22,6 +22,8 @@ class SerializerRegistryProtocol(Protocol):
         type_name: str,
         serializer: Callable[[Any], Any],
         deserializer: Callable[[Any], Any] | None = None,
+        *,
+        data_type: bool = False,
     ) -> None:
         """Register serializer/deserializer pair for a type."""
 
@@ -33,6 +35,9 @@ class SerializerRegistryProtocol(Protocol):
 
     def has_handler(self, type_name: str) -> bool:
         """Return True if a serializer exists for *type_name*."""
+
+    def is_data_type(self, type_name: str) -> bool:
+        """Return True if *type_name* is a data payload type."""
 
 
 @runtime_checkable

@@ -336,7 +336,8 @@ class AsyncRPC:
 
         # Try to send response; if serialization fails, send error response instead
         try:
-            self._transport.send(_prepare_for_rpc(response))
+            prepared = _prepare_for_rpc(response)
+            self._transport.send(prepared)
         except (TypeError, ValueError) as serialize_exc:
             # FAIL LOUD: Log and propagate serialization failures
             logger.error(

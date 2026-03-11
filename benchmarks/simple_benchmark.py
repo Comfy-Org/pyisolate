@@ -37,6 +37,7 @@ async def measure_rpc_overhead(include_large_tensors=False):
     print()
 
     import os
+
     if sys.platform == "linux" and os.environ.get("TMPDIR") != "/dev/shm":
         print("WARNING: TMPDIR is not set to /dev/shm on Linux.")
         print("If extensions use share_torch=True, execution WILL fail in strict sandboxes.")

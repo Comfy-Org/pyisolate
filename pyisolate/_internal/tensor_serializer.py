@@ -1,6 +1,7 @@
 import atexit
 import base64
 import collections
+import contextlib
 import logging
 import os
 import signal
@@ -195,12 +196,15 @@ def purge_orphan_sender_shm_files(min_age_seconds: float = 1.0, force: bool = Fa
 
 
 def _flush_tensor_keeper_on_exit() -> None:
-    try:
+    # purge_orphan_sender_shm_files is intentionally NOT called here.
+    # Calling it with force=True races with the C++ RefcountedMapAllocator
+    # destructor: SIGKILL'd child peers leave the refcount file at count > 1,
+    # so the host's C++ close() decrements but does NOT unlink (refcount still > 0).
+    # purge_orphan would then unlink the file while the C++ mmap is still open,
+    # causing a double-unlink → ENOENT → SIGABRT at process exit.
+    # Files are cleaned up by the C++ destructor when the last consumer closes.
+    with contextlib.suppress(Exception):
         flush_tensor_keeper()
-        purge_orphan_sender_shm_files(min_age_seconds=0.0, force=True)
-    except Exception:
-        # Best-effort shutdown cleanup.
-        pass
 
 
 atexit.register(_flush_tensor_keeper_on_exit)

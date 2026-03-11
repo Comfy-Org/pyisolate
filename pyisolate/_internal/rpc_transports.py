@@ -145,8 +145,13 @@ class JSONSocketTransport:
             if not raw_len or len(raw_len) < 4:
                 raise ConnectionError("Socket closed or incomplete length header")
             msg_len = struct.unpack(">I", raw_len)[0]
-            if msg_len > 100 * 1024 * 1024:  # 100MB sanity limit
+            if msg_len > 2 * 1024 * 1024 * 1024:  # 2GB hard limit
                 raise ValueError(f"Message too large: {msg_len} bytes")
+            if msg_len > 100 * 1024 * 1024:  # 100MB — flag large payloads
+                logger.warning(
+                    "Large RPC message: %.1fMB — consider SHM-backed transfer for this type",
+                    msg_len / (1024 * 1024),
+                )
             data = self._recvall(msg_len)
             if len(data) < msg_len:
                 raise ConnectionError(f"Incomplete message: got {len(data)}/{msg_len} bytes")
