@@ -1,7 +1,13 @@
 from __future__ import annotations
 
+import sys
 from enum import Enum
 from typing import TYPE_CHECKING, Any, TypedDict
+
+if sys.version_info >= (3, 11):
+    from typing import NotRequired
+else:
+    from typing_extensions import NotRequired
 
 if TYPE_CHECKING:
     from ._internal.rpc_protocol import ProxiedSingleton
@@ -34,6 +40,19 @@ class SandboxConfig(TypedDict, total=False):
     writable_paths: list[str]
     readonly_paths: list[str] | dict[str, str]  # Supports src:dst mapping
     network: bool
+
+
+class CUDAWheelConfig(TypedDict):
+    """Configuration for custom CUDA wheel resolution."""
+
+    index_url: str
+    """Base URL containing per-package simple index directories."""
+
+    packages: list[str]
+    """Canonicalized dependency names that must resolve via the custom index."""
+
+    package_map: NotRequired[dict[str, str]]
+    """Optional canonical dependency-name to index-package-name overrides."""
 
 
 class ExtensionConfig(TypedDict):
@@ -69,3 +88,6 @@ class ExtensionConfig(TypedDict):
 
     env: dict[str, str]
     """Environment variable overrides for the child process."""
+
+    cuda_wheels: NotRequired[CUDAWheelConfig]
+    """Optional custom CUDA wheel resolution configuration for selected dependencies."""
