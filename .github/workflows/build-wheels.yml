@@ -115,28 +115,12 @@ jobs:
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
-          pattern: dist-*
-          merge-multiple: false
-          path: downloaded
+          name: dist-ubuntu-latest-py3.11
+          path: dist
 
-      - name: Collect distributions
+      - name: Verify distributions
         shell: bash
         run: |
-          mkdir -p dist
-          find downloaded -type f \( -name "*.whl" -o -name "*.tar.gz" \) -print0 | while IFS= read -r -d '' src; do
-            base="$(basename "$src")"
-            dest="dist/$base"
-            if [ -e "$dest" ]; then
-              # Deduplicate byte-identical files produced in multiple matrix legs.
-              if cmp -s "$src" "$dest"; then
-                continue
-              fi
-              echo "Conflicting distribution filename with different content: $base"
-              exit 1
-            fi
-            cp "$src" "$dest"
-          done
-
           wheel_count="$(find dist -maxdepth 1 -type f -name '*.whl' | wc -l)"
           sdist_count="$(find dist -maxdepth 1 -type f -name '*.tar.gz' | wc -l)"
           if [ "$wheel_count" -eq 0 ] || [ "$sdist_count" -eq 0 ]; then
