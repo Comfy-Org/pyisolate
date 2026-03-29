@@ -316,6 +316,104 @@ class TestGPUPassthrough:
 class TestFilesystemIsolation:
     """Test filesystem isolation properties."""
 
+    def test_base_prefix_ro_bound(self) -> None:
+        """Verify sys.base_prefix is added to --ro-bind to support non-standard host Pythons."""
+        with patch.object(sys, "base_prefix", "/opt/custom_python"):
+            cmd = _mockbuild_bwrap_command(
+                python_exe="/venv/bin/python",
+                module_path="/path/to/module",
+                venv_path="/venv",
+                uds_address="/run/user/1000/pyisolate/test.sock",
+                allow_gpu=False,
+                restriction_model=RestrictionModel.NONE,
+            )
+
+            cmd_str = " ".join(cmd)
+            assert "--ro-bind /opt/custom_python /opt/custom_python" in cmd_str
+
+    def test_adapter_system_paths_ro_bound(self) -> None:
+        """Verify adapter-provided system paths are added to --ro-bind."""
+        mock_adapter = MagicMock()
+        mock_adapter.get_sandbox_system_paths.return_value = ["/app/framework"]
+
+        cmd = _mockbuild_bwrap_command(
+            python_exe="/venv/bin/python",
+            module_path="/path/to/module",
+            venv_path="/venv",
+            uds_address="/run/user/1000/pyisolate/test.sock",
+            allow_gpu=False,
+            restriction_model=RestrictionModel.NONE,
+            adapter=mock_adapter,
+        )
+
+        cmd_str = " ".join(cmd)
+        assert "--ro-bind /app/framework /app/framework" in cmd_str
+
+    def test_adapter_none_no_framework_path(self) -> None:
+        """Verify adapter=None does NOT produce framework path binding."""
+        cmd = _mockbuild_bwrap_command(
+            python_exe="/venv/bin/python",
+            module_path="/path/to/module",
+            venv_path="/venv",
+            uds_address="/run/user/1000/pyisolate/test.sock",
+            allow_gpu=False,
+            restriction_model=RestrictionModel.NONE,
+            adapter=None,
+        )
+
+        cmd_str = " ".join(cmd)
+        assert "/app/framework" not in cmd_str
+
+    def test_resolved_python_prefix_ro_bound(self) -> None:
+        """Verify the resolved venv interpreter prefix is also bound read-only."""
+        with patch(
+            "pathlib.Path.resolve",
+            return_value=Path("/home/linuxbrew/.linuxbrew/Cellar/python@3.13/3.13.12_1/bin/python3.13"),
+        ):
+            cmd = _mockbuild_bwrap_command(
+                python_exe="/venv/bin/python",
+                module_path="/path/to/module",
+                venv_path="/venv",
+                uds_address="/run/user/1000/pyisolate/test.sock",
+                allow_gpu=False,
+                restriction_model=RestrictionModel.NONE,
+            )
+
+            cmd_str = " ".join(cmd)
+            assert (
+                "--ro-bind /home/linuxbrew/.linuxbrew/Cellar/python@3.13/3.13.12_1 "
+                "/home/linuxbrew/.linuxbrew/Cellar/python@3.13/3.13.12_1"
+            ) in cmd_str
+
+    def test_python_symlink_prefix_ro_bound(self) -> None:
+        """Verify the raw symlink target prefix is also bound read-only."""
+        with (
+            patch("pathlib.Path.is_symlink", return_value=True),
+            patch(
+                "os.readlink",
+                return_value="/home/linuxbrew/.linuxbrew/opt/python@3.13/bin/python3.13",
+            ),
+            patch(
+                "pathlib.Path.resolve",
+                return_value=Path("/home/linuxbrew/.linuxbrew/Cellar/python@3.13/3.13.12_1/bin/python3.13"),
+            ),
+        ):
+            cmd = _mockbuild_bwrap_command(
+                python_exe="/venv/bin/python",
+                module_path="/path/to/module",
+                venv_path="/venv",
+                uds_address="/run/user/1000/pyisolate/test.sock",
+                allow_gpu=False,
+                restriction_model=RestrictionModel.NONE,
+            )
+
+            cmd_str = " ".join(cmd)
+            assert (
+                "--ro-bind /home/linuxbrew/.linuxbrew/opt/python@3.13 "
+                "/home/linuxbrew/.linuxbrew/opt/python@3.13"
+            ) in cmd_str
+            assert "--ro-bind /home/linuxbrew/.linuxbrew /home/linuxbrew/.linuxbrew" in cmd_str
+
     def test_venv_readonly(self) -> None:
         """Verify venv is bound read-only."""
         cmd = _mockbuild_bwrap_command(
@@ -364,6 +462,22 @@ class TestFilesystemIsolation:
         )
         cmd_str = " ".join(cmd)
         assert "--tmpfs /tmp" in cmd_str
+
+    def test_tmpfs_tmp_and_no_host_tmp_bind(self) -> None:
+        """Verify host /tmp cannot override the private tmpfs."""
+        cmd = _mockbuild_bwrap_command(
+            python_exe="/venv/bin/python",
+            module_path="/path/to/module",
+            venv_path="/venv",
+            uds_address="/run/user/1000/pyisolate/test.sock",
+            allow_gpu=False,
+            restriction_model=RestrictionModel.NONE,
+            sandbox_config={"writable_paths": ["/dev/shm", "/tmp", "/tmp/"]},
+        )
+
+        cmd_str = " ".join(cmd)
+        assert "--tmpfs /tmp" in cmd_str
+        assert "--bind /tmp /tmp" not in cmd_str
 
     def test_proc_dev_mounted(self) -> None:
         """Verify /proc and /dev are mounted."""
@@ -459,3 +573,121 @@ class TestCommandStructure:
         assert cmd[-3] == "/venv/bin/python"
         assert cmd[-2] == "-m"
         assert cmd[-1] == "pyisolate._internal.uds_client"
+
+
+class TestSealedWorkerCommand:
+    """Test strict sealed-worker sandbox policy."""
+
+    def test_sealed_worker_uses_clearenv(self) -> None:
+        cmd = _mockbuild_bwrap_command(
+            python_exe="/venv/bin/python",
+            module_path="/path/to/module",
+            venv_path="/venv",
+            uds_address="/run/user/1000/pyisolate/test.sock",
+            allow_gpu=False,
+            restriction_model=RestrictionModel.NONE,
+            execution_model="sealed_worker",
+        )
+        assert "--clearenv" in cmd
+
+    def test_sealed_worker_does_not_bind_host_site_packages(self) -> None:
+        cmd = _mockbuild_bwrap_command(
+            python_exe="/venv/bin/python",
+            module_path="/path/to/module",
+            venv_path="/venv",
+            uds_address="/run/user/1000/pyisolate/test.sock",
+            allow_gpu=False,
+            restriction_model=RestrictionModel.NONE,
+            execution_model="sealed_worker",
+        )
+        cmd_str = " ".join(cmd)
+        assert "site-packages" not in cmd_str
+
+    def test_sealed_worker_does_not_bind_host_pyisolate_or_comfy(self) -> None:
+        cmd = _mockbuild_bwrap_command(
+            python_exe="/venv/bin/python",
+            module_path="/path/to/module",
+            venv_path="/venv",
+            uds_address="/run/user/1000/pyisolate/test.sock",
+            allow_gpu=False,
+            restriction_model=RestrictionModel.NONE,
+            execution_model="sealed_worker",
+        )
+        cmd_str = " ".join(cmd)
+        assert "/fake/pyisolate" not in cmd_str
+        assert "comfy" not in cmd_str
+
+    def test_sealed_worker_does_not_set_pythonpath(self) -> None:
+        cmd = _mockbuild_bwrap_command(
+            python_exe="/venv/bin/python",
+            module_path="/path/to/module",
+            venv_path="/venv",
+            uds_address="/run/user/1000/pyisolate/test.sock",
+            allow_gpu=False,
+            restriction_model=RestrictionModel.NONE,
+            execution_model="sealed_worker",
+        )
+        assert "PYTHONPATH" not in cmd
+
+    def test_sealed_worker_does_not_bind_dev_shm(self) -> None:
+        cmd = _mockbuild_bwrap_command(
+            python_exe="/venv/bin/python",
+            module_path="/path/to/module",
+            venv_path="/venv",
+            uds_address="/run/user/1000/pyisolate/test.sock",
+            allow_gpu=False,
+            restriction_model=RestrictionModel.NONE,
+            execution_model="sealed_worker",
+        )
+        for i, arg in enumerate(cmd):
+            if arg in ("--bind", "--dev-bind") and i + 1 < len(cmd):
+                assert "/dev/shm" not in cmd[i + 1]
+
+    def test_sealed_worker_host_policy_ro_paths_add_ro_bind_and_keep_clearenv(self) -> None:
+        cmd = _mockbuild_bwrap_command(
+            python_exe="/venv/bin/python",
+            module_path="/path/to/module",
+            venv_path="/venv",
+            uds_address="/run/user/1000/pyisolate/test.sock",
+            allow_gpu=False,
+            restriction_model=RestrictionModel.NONE,
+            execution_model="sealed_worker",
+            sealed_host_ro_paths=["/home/johnj/ComfyUI"],
+        )
+        cmd_str = " ".join(cmd)
+        assert "--ro-bind /home/johnj/ComfyUI /home/johnj/ComfyUI" in cmd_str
+        assert "--clearenv" in cmd
+        assert "PYTHONPATH" not in cmd
+        assert "--setenv PYTHONPATH " not in cmd_str
+
+    def test_sealed_worker_sets_explicit_env_allowlist(self) -> None:
+        with patch.dict(
+            "os.environ",
+            {
+                "PATH": "/usr/bin:/bin",
+                "LANG": "C.UTF-8",
+                "LC_ALL": "C.UTF-8",
+                "HOME": "/home/johnj",
+                "PYTHONPATH": "/host/leak",
+                "SECRET_TOKEN": "leak",
+            },
+            clear=True,
+        ):
+            cmd = _mockbuild_bwrap_command(
+                python_exe="/venv/bin/python",
+                module_path="/path/to/module",
+                venv_path="/venv",
+                uds_address="/run/user/1000/pyisolate/test.sock",
+                allow_gpu=False,
+                restriction_model=RestrictionModel.NONE,
+                execution_model="sealed_worker",
+            )
+        cmd_str = " ".join(cmd)
+        assert "--setenv PATH /usr/bin:/bin" in cmd_str
+        assert "--setenv LANG C.UTF-8" in cmd_str
+        assert "--setenv LC_ALL C.UTF-8" in cmd_str
+        assert "--setenv HOME /tmp" in cmd_str
+        assert "--setenv TMPDIR /tmp" in cmd_str
+        assert "--setenv PYTHONNOUSERSITE 1" in cmd_str
+        assert "SECRET_TOKEN" not in cmd_str
+        assert "/host/leak" not in cmd_str

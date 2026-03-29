@@ -20,6 +20,8 @@ from typing import (
     TypedDict,
 )
 
+from .torch_gate import get_torch_optional
+
 if TYPE_CHECKING:
     # Avoid circular imports for type checking if possible
     # But here we just need types that might be used in annotations
@@ -222,6 +224,7 @@ _debug_rpc = debug_all_messages
 # Removed static _cuda_ipc_env_enabled to allow runtime updates
 _cuda_ipc_warned = False
 _ipc_metrics: dict[str, int] = {"send_cuda_ipc": 0, "send_cuda_fallback": 0}
+_SERIALIZER_BY_TYPE: dict[type[Any], Any | None] = {}
 
 
 def debugprint(*args: Any, **kwargs: Any) -> None:
@@ -232,6 +235,63 @@ def debugprint(*args: Any, **kwargs: Any) -> None:
 # ---------------------------------------------------------------------------
 # Serialization Functions
 # ---------------------------------------------------------------------------
+
+
+def _resolve_serializer_for_type(registry: Any, obj_type: type[Any]) -> Any | None:
+    cached = _SERIALIZER_BY_TYPE.get(obj_type)
+    if obj_type in _SERIALIZER_BY_TYPE:
+        return cached
+
+    serializer = registry.get_serializer(obj_type.__name__)
+    if serializer is not None:
+        _SERIALIZER_BY_TYPE[obj_type] = serializer
+        return serializer
+
+    for base in obj_type.__mro__[1:]:
+        serializer = registry.get_serializer(base.__name__)
+        if serializer is not None:
+            _SERIALIZER_BY_TYPE[obj_type] = serializer
+            return serializer
+
+    _SERIALIZER_BY_TYPE[obj_type] = None
+    return None
+
+
+def _prepare_for_rpc_impl(
+    obj: Any,
+    *,
+    registry: Any,
+    torch_module: Any,
+) -> Any:
+    obj_type = type(obj)
+    serializer = _resolve_serializer_for_type(registry, obj_type)
+    if serializer is not None:
+        return serializer(obj)
+
+    if torch_module is not None and isinstance(obj, torch_module.Tensor):
+        if obj.is_cuda:
+            if os.environ.get("PYISOLATE_ENABLE_CUDA_IPC") == "1":
+                _ipc_metrics["send_cuda_ipc"] += 1
+                return obj
+            _ipc_metrics["send_cuda_fallback"] += 1
+            return obj.cpu()
+        return obj
+
+    if isinstance(obj, dict):
+        return {
+            k: _prepare_for_rpc_impl(v, registry=registry, torch_module=torch_module) for k, v in obj.items()
+        }
+
+    if isinstance(obj, (list, tuple)):
+        converted = [
+            _prepare_for_rpc_impl(item, registry=registry, torch_module=torch_module) for item in obj
+        ]
+        return tuple(converted) if isinstance(obj, tuple) else converted
+
+    if isinstance(obj, (str, int, float, bool, type(None), bytes)):
+        return obj
+
+    return obj
 
 
 def _prepare_for_rpc(obj: Any) -> Any:
@@ -245,53 +305,11 @@ def _prepare_for_rpc(obj: Any) -> Any:
     Adapter-registered types are serialized via SerializerRegistry.
     Unpicklable custom containers are downgraded into plain serializable forms.
     """
-    type_name = type(obj).__name__
-
-    # Check for adapter-registered serializers first
     from .serialization_registry import SerializerRegistry
 
     registry = SerializerRegistry.get_instance()
-
-    # Try exact type name first (fast path)
-    if registry.has_handler(type_name):
-        serializer = registry.get_serializer(type_name)
-        if serializer:
-            return serializer(obj)
-
-    # Check base classes for inheritance support
-    for base in type(obj).__mro__[1:]:  # Skip obj itself
-        if registry.has_handler(base.__name__):
-            serializer = registry.get_serializer(base.__name__)
-            if serializer:
-                return serializer(obj)
-
-    try:
-        import torch
-
-        if isinstance(obj, torch.Tensor):
-            if obj.is_cuda:
-                # Dynamic check to respect runtime activation in host.py
-                if os.environ.get("PYISOLATE_ENABLE_CUDA_IPC") == "1":
-                    _ipc_metrics["send_cuda_ipc"] += 1
-                    return obj  # allow CUDA IPC path
-                _ipc_metrics["send_cuda_fallback"] += 1
-                return obj.cpu()
-            return obj
-    except ImportError:
-        pass
-
-    if isinstance(obj, dict):
-        return {k: _prepare_for_rpc(v) for k, v in obj.items()}
-
-    if isinstance(obj, (list, tuple)):
-        converted = [_prepare_for_rpc(item) for item in obj]
-        return tuple(converted) if isinstance(obj, tuple) else converted
-
-    # Primitives pass through
-    if isinstance(obj, (str, int, float, bool, type(None), bytes)):
-        return obj
-
-    return obj
+    torch_module, _ = get_torch_optional()
+    return _prepare_for_rpc_impl(obj, registry=registry, torch_module=torch_module)
 
 
 def _tensor_to_cuda(obj: Any, device: Any | None = None) -> Any:
@@ -324,10 +342,28 @@ def _tensor_to_cuda(obj: Any, device: Any | None = None) -> Any:
 
     if isinstance(obj, dict):
         ref_type = obj.get("__type__")
-        if ref_type and registry.has_handler(ref_type):
-            deserializer = registry.get_deserializer(ref_type)
-            if deserializer:
-                return deserializer(obj)
+        if ref_type:
+            has = registry.has_handler(ref_type)
+            if has:
+                deserializer = registry.get_deserializer(ref_type)
+                if deserializer:
+                    result = deserializer(obj)
+                    logger.warning(
+                        "][ DIAG: __type__=%s -> %s",
+                        ref_type,
+                        type(result).__name__,
+                    )
+                    return result
+                else:
+                    logger.warning(
+                        "][ DIAG: __type__=%s no deserializer",
+                        ref_type,
+                    )
+            else:
+                logger.warning(
+                    "][ DIAG: __type__=%s no handler",
+                    ref_type,
+                )
 
         # Handle pyisolate internal container types
         if obj.get("__pyisolate_attribute_container__") and "data" in obj:

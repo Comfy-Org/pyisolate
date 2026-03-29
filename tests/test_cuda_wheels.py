@@ -15,8 +15,10 @@ from packaging.tags import sys_tags
 from pyisolate._internal import environment
 from pyisolate._internal.cuda_wheels import (
     CUDAWheelResolutionError,
+    _normalize_cuda_wheel_config,
     get_cuda_wheel_runtime,
     resolve_cuda_wheel_requirements,
+    resolve_cuda_wheel_url,
 )
 
 
@@ -45,7 +47,7 @@ def test_resolve_cuda_wheel_requirement_to_direct_url(monkeypatch):
     wheel = _wheel_filename("flash_attn", "1.1.0+cu128torch28")
     page_url = "https://example.invalid/cuda-wheels/flash-attn/"
 
-    monkeypatch.setattr("pyisolate._internal.cuda_wheels.get_cuda_wheel_runtime", lambda: runtime)
+    monkeypatch.setattr("pyisolate._internal.cuda_wheels.get_cuda_wheel_runtime", lambda **kw: runtime)
     monkeypatch.setattr(
         "pyisolate._internal.cuda_wheels._fetch_index_html",
         lambda url: _simple_index_html(wheel) if url == page_url else None,
@@ -68,7 +70,7 @@ def test_resolve_cuda_wheel_requirement_supports_underscore_index(monkeypatch):
     wheel = _wheel_filename("torch_generic_nms", "0.2.0+cu128torch28")
     page_url = "https://example.invalid/cuda-wheels/torch_generic_nms/"
 
-    monkeypatch.setattr("pyisolate._internal.cuda_wheels.get_cuda_wheel_runtime", lambda: runtime)
+    monkeypatch.setattr("pyisolate._internal.cuda_wheels.get_cuda_wheel_runtime", lambda **kw: runtime)
     monkeypatch.setattr(
         "pyisolate._internal.cuda_wheels._fetch_index_html",
         lambda url: _simple_index_html(wheel) if url == page_url else None,
@@ -92,7 +94,7 @@ def test_resolve_cuda_wheel_requirement_supports_percent_encoded_links(monkeypat
     encoded_wheel = wheel.replace("+", "%2B")
     page_url = "https://example.invalid/cuda-wheels/torch-generic-nms/"
 
-    monkeypatch.setattr("pyisolate._internal.cuda_wheels.get_cuda_wheel_runtime", lambda: runtime)
+    monkeypatch.setattr("pyisolate._internal.cuda_wheels.get_cuda_wheel_runtime", lambda **kw: runtime)
     monkeypatch.setattr(
         "pyisolate._internal.cuda_wheels._fetch_index_html",
         lambda url: _simple_index_html(encoded_wheel) if url == page_url else None,
@@ -115,7 +117,7 @@ def test_resolve_cuda_wheel_requirement_honors_package_map(monkeypatch):
     wheel = _wheel_filename("flash_attn", "1.2.0+cu128torch28")
     page_url = "https://example.invalid/cuda-wheels/flash_attn_special/"
 
-    monkeypatch.setattr("pyisolate._internal.cuda_wheels.get_cuda_wheel_runtime", lambda: runtime)
+    monkeypatch.setattr("pyisolate._internal.cuda_wheels.get_cuda_wheel_runtime", lambda **kw: runtime)
     monkeypatch.setattr(
         "pyisolate._internal.cuda_wheels._fetch_index_html",
         lambda url: _simple_index_html(wheel) if url == page_url else None,
@@ -141,7 +143,7 @@ def test_resolve_cuda_wheel_requirement_picks_highest_matching_version(monkeypat
     out_of_range = _wheel_filename("flash_attn", "2.0.0+cu128torch28")
     page_url = "https://example.invalid/cuda-wheels/flash-attn/"
 
-    monkeypatch.setattr("pyisolate._internal.cuda_wheels.get_cuda_wheel_runtime", lambda: runtime)
+    monkeypatch.setattr("pyisolate._internal.cuda_wheels.get_cuda_wheel_runtime", lambda **kw: runtime)
     monkeypatch.setattr(
         "pyisolate._internal.cuda_wheels._fetch_index_html",
         lambda url: (
@@ -182,7 +184,7 @@ def test_resolve_cuda_wheel_requirement_prefers_better_supported_tag(monkeypatch
     preferred = f"torch_generic_nms-0.1+cu128torch28-{ml_tag.interpreter}-{ml_tag.abi}-{ml_tag.platform}.whl"
     fallback = f"torch_generic_nms-0.1+cu128torch28-{lx_tag.interpreter}-{lx_tag.abi}-{lx_tag.platform}.whl"
 
-    monkeypatch.setattr("pyisolate._internal.cuda_wheels.get_cuda_wheel_runtime", lambda: runtime)
+    monkeypatch.setattr("pyisolate._internal.cuda_wheels.get_cuda_wheel_runtime", lambda **kw: runtime)
     monkeypatch.setattr(
         "pyisolate._internal.cuda_wheels._fetch_index_html",
         lambda url: (
@@ -211,7 +213,7 @@ def test_resolve_cuda_wheel_requirement_raises_when_no_match(monkeypatch):
     wheel = _wheel_filename("flash_attn", "1.1.0+cu127torch28")
     page_url = "https://example.invalid/cuda-wheels/flash-attn/"
 
-    monkeypatch.setattr("pyisolate._internal.cuda_wheels.get_cuda_wheel_runtime", lambda: runtime)
+    monkeypatch.setattr("pyisolate._internal.cuda_wheels.get_cuda_wheel_runtime", lambda **kw: runtime)
     monkeypatch.setattr(
         "pyisolate._internal.cuda_wheels._fetch_index_html",
         lambda url: _simple_index_html(wheel) if url == page_url else None,
@@ -315,3 +317,251 @@ def test_install_dependencies_cache_invalidation_tracks_cuda_runtime(monkeypatch
     environment.install_dependencies(venv_path, config, "demo")
 
     assert len(popen_calls) == 2
+
+
+# ── target_python parameter tests ─────────────────────────────────────
+
+
+def _wheel_filename_for_cpython(distribution: str, version: str, cpython: str) -> str:
+    """Build a wheel filename with a specific cpython tag (e.g. 'cp312')."""
+    tag = next(iter(sys_tags()))
+    return f"{distribution}-{version}-{cpython}-{cpython}-{tag.platform}.whl"
+
+
+def test_resolve_cuda_wheel_url_accepts_target_python_parameter(monkeypatch):
+    """AC-1: resolve_cuda_wheel_url accepts target_python=(3, 12) without TypeError."""
+    runtime = _runtime()
+    wheel_312 = _wheel_filename_for_cpython("flash_attn", "1.0.0+cu128torch28", "cp312")
+    page_url = "https://example.invalid/cuda-wheels/flash-attn/"
+
+    monkeypatch.setattr("pyisolate._internal.cuda_wheels.get_cuda_wheel_runtime", lambda **kw: runtime)
+    monkeypatch.setattr(
+        "pyisolate._internal.cuda_wheels._fetch_index_html",
+        lambda url: _simple_index_html(wheel_312) if url == page_url else None,
+    )
+
+    from packaging.requirements import Requirement
+
+    url = resolve_cuda_wheel_url(
+        Requirement("flash-attn"),
+        {
+            "index_url": "https://example.invalid/cuda-wheels/",
+            "packages": ["flash-attn"],
+            "package_map": {},
+        },
+        runtime,
+        target_python=(3, 12),
+    )
+    assert url.endswith(".whl")
+    assert "cp312" in url
+
+
+def test_resolve_cuda_wheel_uses_target_python_tags(monkeypatch):
+    """AC-2: target_python=(3, 12) selects cp312 wheel, not cp313."""
+    runtime = _runtime()
+    wheel_312 = _wheel_filename_for_cpython("flash_attn", "1.0.0+cu128torch28", "cp312")
+    wheel_313 = _wheel_filename_for_cpython("flash_attn", "1.0.0+cu128torch28", "cp313")
+    page_url = "https://example.invalid/cuda-wheels/flash-attn/"
+
+    monkeypatch.setattr("pyisolate._internal.cuda_wheels.get_cuda_wheel_runtime", lambda **kw: runtime)
+    monkeypatch.setattr(
+        "pyisolate._internal.cuda_wheels._fetch_index_html",
+        lambda url: _simple_index_html(wheel_312, wheel_313) if url == page_url else None,
+    )
+
+    from packaging.requirements import Requirement
+
+    url = resolve_cuda_wheel_url(
+        Requirement("flash-attn"),
+        {
+            "index_url": "https://example.invalid/cuda-wheels/",
+            "packages": ["flash-attn"],
+            "package_map": {},
+        },
+        runtime,
+        target_python=(3, 12),
+    )
+    assert "cp312" in url
+    assert "cp313" not in url
+
+
+def test_resolve_cuda_wheel_requirements_threads_target_python(monkeypatch):
+    """AC-3: resolve_cuda_wheel_requirements threads target_python to resolve_cuda_wheel_url."""
+    runtime = _runtime()
+    wheel_312 = _wheel_filename_for_cpython("flash_attn", "1.0.0+cu128torch28", "cp312")
+    wheel_313 = _wheel_filename_for_cpython("flash_attn", "1.0.0+cu128torch28", "cp313")
+    page_url = "https://example.invalid/cuda-wheels/flash-attn/"
+
+    monkeypatch.setattr("pyisolate._internal.cuda_wheels.get_cuda_wheel_runtime", lambda **kw: runtime)
+    monkeypatch.setattr(
+        "pyisolate._internal.cuda_wheels._fetch_index_html",
+        lambda url: _simple_index_html(wheel_312, wheel_313) if url == page_url else None,
+    )
+
+    resolved = resolve_cuda_wheel_requirements(
+        ["flash-attn>=1.0"],
+        {
+            "index_url": "https://example.invalid/cuda-wheels/",
+            "packages": ["flash-attn"],
+            "package_map": {},
+        },
+        target_python=(3, 12),
+    )
+    assert len(resolved) == 1
+    assert "cp312" in resolved[0]
+    assert "cp313" not in resolved[0]
+
+
+def test_resolve_cuda_wheel_target_python_rejects_host_only_wheel(monkeypatch):
+    """AC-4: target_python=(3, 12) raises when only cp313 wheel available."""
+    runtime = _runtime()
+    wheel_313_only = _wheel_filename_for_cpython("flash_attn", "1.0.0+cu128torch28", "cp313")
+    page_url = "https://example.invalid/cuda-wheels/flash-attn/"
+
+    monkeypatch.setattr("pyisolate._internal.cuda_wheels.get_cuda_wheel_runtime", lambda **kw: runtime)
+    monkeypatch.setattr(
+        "pyisolate._internal.cuda_wheels._fetch_index_html",
+        lambda url: _simple_index_html(wheel_313_only) if url == page_url else None,
+    )
+
+    from packaging.requirements import Requirement
+
+    with pytest.raises(CUDAWheelResolutionError, match="No compatible CUDA wheel found"):
+        resolve_cuda_wheel_url(
+            Requirement("flash-attn"),
+            {
+                "index_url": "https://example.invalid/cuda-wheels/",
+                "packages": ["flash-attn"],
+                "package_map": {},
+            },
+            runtime,
+            target_python=(3, 12),
+        )
+
+
+# ── index_urls (plural) support tests ─────────────────────────────────
+
+
+def test_normalize_config_index_urls():
+    """AC-1: _normalize_cuda_wheel_config accepts index_urls (plural list)."""
+    config = {
+        "index_urls": [
+            "https://download.pytorch.org/whl/cu128",
+            "https://pozzettiandrea.github.io/cuda-wheels/",
+        ],
+        "packages": ["cumesh", "torch"],
+        "package_map": {},
+    }
+    result = _normalize_cuda_wheel_config(config)
+    assert "index_urls" in result
+    assert isinstance(result["index_urls"], list)
+    assert len(result["index_urls"]) == 2
+    assert result["index_urls"][0] == "https://download.pytorch.org/whl/cu128/"
+    assert result["index_urls"][1] == "https://pozzettiandrea.github.io/cuda-wheels/"
+
+
+def test_normalize_config_singular_returns_index_urls_key():
+    """AC-2: _normalize_cuda_wheel_config with index_url (singular) returns index_urls key (plural)."""
+    config = {
+        "index_url": "https://example.invalid/cuda-wheels",
+        "packages": ["flash-attn"],
+        "package_map": {},
+    }
+    result = _normalize_cuda_wheel_config(config)
+    assert "index_urls" in result, "Expected 'index_urls' key in normalized config"
+    assert "index_url" not in result, "Expected NO 'index_url' key in normalized config"
+    assert result["index_urls"] == ["https://example.invalid/cuda-wheels/"]
+
+
+def test_resolve_iterates_multiple_indexes(monkeypatch):
+    """AC-3: resolve_cuda_wheel_url iterates multiple index URLs to find a package."""
+    runtime = _runtime()
+    wheel = _wheel_filename("cumesh", "0.0.1+cu128torch28")
+    # cumesh only exists on the second index URL
+    second_index_page = "https://pozzettiandrea.github.io/cuda-wheels/cumesh/"
+
+    monkeypatch.setattr("pyisolate._internal.cuda_wheels.get_cuda_wheel_runtime", lambda **kw: runtime)
+    monkeypatch.setattr(
+        "pyisolate._internal.cuda_wheels._fetch_index_html",
+        lambda url: _simple_index_html(wheel) if url == second_index_page else None,
+    )
+
+    from packaging.requirements import Requirement
+
+    url = resolve_cuda_wheel_url(
+        Requirement("cumesh"),
+        {
+            "index_urls": [
+                "https://download.pytorch.org/whl/cu128/",
+                "https://pozzettiandrea.github.io/cuda-wheels/",
+            ],
+            "packages": ["cumesh"],
+            "package_map": {},
+        },
+        runtime,
+    )
+    assert url.endswith(".whl")
+    assert "cumesh" in url
+    assert "pozzettiandrea" in url
+
+
+# ── Live network tests ────────────────────────────────────────────────
+
+
+@pytest.mark.network
+def test_resolve_sageattention_for_target_python_312():
+    """AC-1/AC-2: Live index resolves cp312 wheel with correct torch+CUDA pattern."""
+    from packaging.requirements import Requirement
+
+    from pyisolate._internal.cuda_wheels import get_cuda_wheel_runtime
+
+    runtime = get_cuda_wheel_runtime(target_python=(3, 12))
+    url = resolve_cuda_wheel_url(
+        Requirement("sageattention"),
+        {
+            "index_url": "https://pozzettiandrea.github.io/cuda-wheels/",
+            "packages": ["sageattention"],
+            "package_map": {},
+        },
+        runtime,
+        target_python=(3, 12),
+    )
+    assert "cp312" in url, f"Expected cp312 in URL: {url}"
+    assert "cp313" not in url, f"Unexpected cp313 in URL: {url}"
+    # AC-2: torch+CUDA pattern preserved (URL may use dotted "torch2.9" or nodot "torch29")
+    assert runtime["cuda_nodot"] in url, f"Expected cuda {runtime['cuda_nodot']} in URL: {url}"
+    assert f"torch{runtime['torch']}" in url or f"torch{runtime['torch_nodot']}" in url, (
+        f"Expected torch {runtime['torch']} or {runtime['torch_nodot']} in URL: {url}"
+    )
+
+
+@pytest.mark.network
+def test_resolve_sageattention_host_tags_selects_cp313():
+    """AC-3: Without target_python selects host cpXXX; with target_python=(3, 11) selects cp311."""
+    from packaging.requirements import Requirement
+
+    from pyisolate._internal.cuda_wheels import get_cuda_wheel_runtime
+
+    # Host tags (should select host interpreter's cp tag — cp312 on this venv)
+    runtime_host = get_cuda_wheel_runtime()
+    config = {
+        "index_url": "https://pozzettiandrea.github.io/cuda-wheels/",
+        "packages": ["sageattention"],
+        "package_map": {},
+    }
+    url_host = resolve_cuda_wheel_url(Requirement("sageattention"), config, runtime_host)
+    # The host cpXXX tag should be present
+    import sys
+
+    host_cp = f"cp{sys.version_info.major}{sys.version_info.minor}"
+    assert host_cp in url_host, f"Expected {host_cp} in host URL: {url_host}"
+
+    # Target tags (3, 11) — should select cp311, different from host
+    runtime_target = get_cuda_wheel_runtime(target_python=(3, 11))
+    url_target = resolve_cuda_wheel_url(
+        Requirement("sageattention"), config, runtime_target, target_python=(3, 11)
+    )
+    assert "cp311" in url_target, f"Expected cp311 in target URL: {url_target}"
+    assert host_cp not in url_target or host_cp == "cp311", (
+        f"Unexpected {host_cp} in target URL: {url_target}"
+    )

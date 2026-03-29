@@ -53,7 +53,12 @@ async def test_async_rpc_stop_requires_run():
 
 
 def test_async_rpc_send_thread_sets_exception_on_send_failure():
+    previous_loop = None
     loop = asyncio.new_event_loop()
+    try:
+        previous_loop = asyncio.get_event_loop_policy().get_event_loop()
+    except RuntimeError:
+        previous_loop = None
     asyncio.set_event_loop(loop)
 
     class FailingQueue:
@@ -76,16 +81,24 @@ def test_async_rpc_send_thread_sets_exception_on_send_failure():
     rpc.outbox.put(pending)
     rpc.outbox.put(None)
 
-    rpc._send_thread()
-    loop.run_until_complete(asyncio.sleep(0))
-    assert pending["future"].done() is True
-    with pytest.raises(RuntimeError):
-        pending["future"].result()
-    loop.close()
+    try:
+        rpc._send_thread()
+        loop.run_until_complete(asyncio.sleep(0))
+        assert pending["future"].done() is True
+        with pytest.raises(RuntimeError):
+            pending["future"].result()
+    finally:
+        asyncio.set_event_loop(previous_loop)
+        loop.close()
 
 
 def test_async_rpc_send_thread_callback_failure_sets_exception():
+    previous_loop = None
     loop = asyncio.new_event_loop()
+    try:
+        previous_loop = asyncio.get_event_loop_policy().get_event_loop()
+    except RuntimeError:
+        previous_loop = None
     asyncio.set_event_loop(loop)
 
     class FailingQueue:
@@ -108,12 +121,15 @@ def test_async_rpc_send_thread_callback_failure_sets_exception():
     rpc.outbox.put(pending)
     rpc.outbox.put(None)
 
-    rpc._send_thread()
-    loop.run_until_complete(asyncio.sleep(0))
-    assert pending["future"].done() is True
-    with pytest.raises(RuntimeError):
-        pending["future"].result()
-    loop.close()
+    try:
+        rpc._send_thread()
+        loop.run_until_complete(asyncio.sleep(0))
+        assert pending["future"].done() is True
+        with pytest.raises(RuntimeError):
+            pending["future"].result()
+    finally:
+        asyncio.set_event_loop(previous_loop)
+        loop.close()
 
 
 def test_singleton_metaclass_inject_guard():

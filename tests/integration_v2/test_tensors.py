@@ -1,5 +1,7 @@
+import gc
+
 import pytest
-import torch
+import torch  # noqa: E402
 
 try:
     import numpy as np  # noqa: F401
@@ -52,6 +54,9 @@ async def test_cuda_allocation(reference_host):
     assert "device" in info
     assert "cuda" in info["device"]
     assert info["allocated_bytes"] >= 10 * 1024 * 1024
+    del info
+    gc.collect()
+    torch.cuda.synchronize()
     print("[TEST] CUDA allocation verified.")
 
 
@@ -76,4 +81,8 @@ async def test_tensor_roundtrip_cuda(reference_host):
     assert isinstance(result, torch.Tensor)
     assert result.device.type == "cuda"
     assert torch.equal(result.cpu(), t.cpu())
+    del result
+    del t
+    gc.collect()
+    torch.cuda.synchronize()
     print("[TEST] CUDA IPC verified.")

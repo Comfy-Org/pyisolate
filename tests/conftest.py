@@ -5,23 +5,12 @@ Add any shared fixtures or pytest configuration here.
 """
 
 import logging
-import os
 import sys
-from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
 from pyisolate._internal.singleton_context import singleton_scope
-
-# Add ComfyUI to sys.path BEFORE any tests run
-# This is required because pyisolate is now ComfyUI-integrated
-COMFYUI_ROOT = os.environ.get("COMFYUI_ROOT") or str(Path.home() / "ComfyUI")
-if COMFYUI_ROOT not in sys.path:
-    sys.path.insert(0, COMFYUI_ROOT)
-
-# Set environment variable so child processes know ComfyUI location
-os.environ.setdefault("COMFYUI_ROOT", COMFYUI_ROOT)
 
 
 @pytest.fixture(autouse=True)

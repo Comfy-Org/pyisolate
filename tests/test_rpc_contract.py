@@ -109,49 +109,61 @@ class TestEventLoopResilience:
 
     def test_singleton_survives_loop_recreation(self):
         """Singleton instance survives event loop recreation."""
-        # Create initial loop
+        try:
+            previous_loop = asyncio.get_event_loop_policy().get_event_loop()
+        except RuntimeError:
+            previous_loop = None
+
         loop1 = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop1)
+        loop2: asyncio.AbstractEventLoop | None = None
+        try:
+            asyncio.set_event_loop(loop1)
+            registry = MockRegistry()
+            obj_id = registry.register("loop1_object")
 
-        # Create singleton and store data
-        registry = MockRegistry()
-        obj_id = registry.register("loop1_object")
+            loop1.close()
 
-        # Close loop1
-        loop1.close()
+            loop2 = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop2)
 
-        # Create new loop
-        loop2 = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop2)
-
-        # Singleton should still work
-        result = registry.get(obj_id)
-        assert result == "loop1_object"
-
-        # Cleanup
-        loop2.close()
+            result = registry.get(obj_id)
+            assert result == "loop1_object"
+        finally:
+            asyncio.set_event_loop(previous_loop)
+            if loop2 is not None:
+                loop2.close()
+            elif not loop1.is_closed():
+                loop1.close()
 
     def test_singleton_data_persists_across_loops(self):
         """Data stored in singleton persists across event loops."""
-        # First loop
+        try:
+            previous_loop = asyncio.get_event_loop_policy().get_event_loop()
+        except RuntimeError:
+            previous_loop = None
+
         loop1 = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop1)
+        loop2: asyncio.AbstractEventLoop | None = None
+        try:
+            asyncio.set_event_loop(loop1)
 
-        registry = MockRegistry()
-        id1 = registry.register("first")
-        id2 = registry.register("second")
+            registry = MockRegistry()
+            id1 = registry.register("first")
+            id2 = registry.register("second")
 
-        loop1.close()
+            loop1.close()
 
-        # Second loop
-        loop2 = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop2)
+            loop2 = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop2)
 
-        # All data should still be accessible
-        assert registry.get(id1) == "first"
-        assert registry.get(id2) == "second"
-
-        loop2.close()
+            assert registry.get(id1) == "first"
+            assert registry.get(id2) == "second"
+        finally:
+            asyncio.set_event_loop(previous_loop)
+            if loop2 is not None:
+                loop2.close()
+            elif not loop1.is_closed():
+                loop1.close()
 
 
 class TestRpcErrorHandling:

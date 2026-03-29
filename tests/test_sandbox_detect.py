@@ -163,6 +163,18 @@ class TestBwrapInvocation:
             args = mock_run.call_args[0][0]
             assert "--unshare-user-try" in args
 
+    def test_bwrap_test_skips_lib64_when_absent(self) -> None:
+        """Test that /lib64 bind is omitted when the path does not exist."""
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        with (
+            patch("subprocess.run", return_value=mock_result) as mock_run,
+            patch("os.path.exists", side_effect=lambda path: path != "/lib64"),
+        ):
+            _test_bwrap("/usr/bin/bwrap")
+            args = mock_run.call_args[0][0]
+            assert "/lib64" not in args
+
     def test_bwrap_test_failure_permission(self) -> None:
         """Test bwrap failure with permission denied."""
         mock_result = MagicMock()
@@ -195,6 +207,18 @@ class TestBwrapInvocation:
             success, error = _test_bwrap_degraded("/usr/bin/bwrap")
             assert success is True
             assert error == ""
+
+    def test_bwrap_degraded_test_skips_lib64_when_absent(self) -> None:
+        """Test degraded bwrap probe omits /lib64 when the path does not exist."""
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        with (
+            patch("subprocess.run", return_value=mock_result) as mock_run,
+            patch("os.path.exists", side_effect=lambda path: path != "/lib64"),
+        ):
+            _test_bwrap_degraded("/usr/bin/bwrap")
+            args = mock_run.call_args[0][0]
+            assert "/lib64" not in args
 
 
 class TestErrorClassification:

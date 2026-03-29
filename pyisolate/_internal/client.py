@@ -107,6 +107,10 @@ async def async_entrypoint(
                 api_instance = cast(ProxiedSingleton, getattr(api, "instance", api))
                 _adapter.handle_api_registration(api_instance, rpc)
 
+        # Let the adapter wire child-side event hooks (e.g., progress bar)
+        if _adapter and hasattr(_adapter, "setup_child_event_hooks"):
+            _adapter.setup_child_event_hooks(extension)
+
         # Sanitize module name for use as Python identifier.
         # Replace '-' and '.' with '_' to prevent import errors when module names contain
         # non-identifier characters (e.g., "my-node" → "my_node", "my.node" → "my_node").

@@ -18,8 +18,13 @@ from .environment import (
     create_venv,
     install_dependencies,
     normalize_extension_name,
+    validate_backend_config,
     validate_dependency,
     validate_path_within_root,
+)
+from .environment_conda import (
+    _resolve_pixi_python,
+    create_conda_env,
 )
 from .rpc_protocol import AsyncRPC
 from .rpc_transports import JSONSocketTransport
@@ -99,6 +104,7 @@ class Extension(Generic[T]):
         self.config = config
         self.extension_type = extension_type
         self._cuda_ipc_enabled = False
+        self._host_rpc_services: list[type[Any]] = []
 
         # Auto-populate APIs from adapter if not already in config
         if "apis" not in self.config:
@@ -116,6 +122,19 @@ class Extension(Generic[T]):
             except Exception as exc:
                 logger.warning("[Extension] Could not load adapter RPC services: %s", exc)
                 self.config["apis"] = []
+
+        if self.config.get("execution_model") == "sealed_worker":
+            try:
+                from .adapter_registry import AdapterRegistry
+
+                adapter = AdapterRegistry.get()
+                if adapter:
+                    self._host_rpc_services = list(adapter.provide_rpc_services())
+            except Exception as exc:
+                logger.warning("[Extension] Could not load sealed-worker host RPC services: %s", exc)
+                self._host_rpc_services = []
+        else:
+            self._host_rpc_services = list(self.config["apis"])
 
         self.mp: Any
         if self.config["share_torch"]:
@@ -140,6 +159,23 @@ class Extension(Generic[T]):
         self._client_sock: Any | None = None
 
         self.extension_proxy: T | None = None
+
+    def _package_manager(self) -> str:
+        return self.config.get("package_manager", "uv")
+
+    def _execution_model(self) -> str:
+        execution_model = self.config.get("execution_model")
+        if execution_model is not None:
+            return execution_model
+        return "sealed_worker" if self._package_manager() == "conda" else "host-coupled"
+
+    def _is_sealed_worker(self) -> bool:
+        return self._execution_model() == "sealed_worker"
+
+    def _tensor_transport_mode(self) -> str:
+        if self._is_sealed_worker():
+            return "json"
+        return "shared_memory"
 
     def ensure_process_started(self) -> None:
         """Start the isolated process if it has not been initialized."""
@@ -194,13 +230,15 @@ class Extension(Generic[T]):
         self.log_listener.start()
 
         torch, _ = get_torch_optional()
+        tensor_transport = self._tensor_transport_mode()
         if torch is not None:
             # Register tensor serializer for JSON-RPC only when torch is available.
             from .serialization_registry import SerializerRegistry
 
-            register_tensor_serializer(SerializerRegistry.get_instance())
+            register_tensor_serializer(SerializerRegistry.get_instance(), mode=tensor_transport)
             # Ensure file_system strategy for CPU tensors.
-            torch.multiprocessing.set_sharing_strategy("file_system")
+            if tensor_transport == "shared_memory":
+                torch.multiprocessing.set_sharing_strategy("file_system")
         elif self.config.get("share_torch", False):
             raise RuntimeError(
                 "share_torch=True requires PyTorch. Install 'torch' to use tensor-sharing features."
@@ -208,8 +246,14 @@ class Extension(Generic[T]):
 
         self.proc = self.__launch()
 
-        for api in self.config["apis"]:
+        for api in self._host_rpc_services:
             api()._register(self.rpc)
+
+        # Register event bridge for child→host event dispatch
+        from .event_bridge import _EventBridge
+
+        self._event_bridge = _EventBridge()
+        self.rpc.register_callee(self._event_bridge, "_event_bridge")
 
         self.rpc.run()
 
@@ -289,8 +333,17 @@ class Extension(Generic[T]):
 
     def __launch(self) -> Any:
         """Launch the extension in a separate process after venv + deps are ready."""
-        create_venv(self.venv_path, self.config)
-        install_dependencies(self.venv_path, self.config, self.name)
+        validate_backend_config(self.config)
+
+        if self._package_manager() == "conda":
+            # Conda backend: force share_cuda_ipc=False (pixi envs don't support IPC)
+            self.config["share_cuda_ipc"] = False
+            self._cuda_ipc_enabled = False
+            create_conda_env(self.venv_path, self.config, self.name)
+        else:
+            create_venv(self.venv_path, self.config)
+            install_dependencies(self.venv_path, self.config, self.name)
+
         return self._launch_with_uds()
 
     def _launch_with_uds(self) -> Any:
@@ -298,7 +351,9 @@ class Extension(Generic[T]):
         from .socket_utils import ensure_ipc_socket_dir, has_af_unix
 
         # Determine Python executable
-        if os.name == "nt":
+        if self._package_manager() == "conda":
+            python_exe = str(_resolve_pixi_python(self.venv_path))
+        elif os.name == "nt":
             python_exe = str(self.venv_path / "Scripts" / "python.exe")
         else:
             python_exe = str(self.venv_path / "bin" / "python")
@@ -327,6 +382,9 @@ class Extension(Generic[T]):
 
         # Prepare environment
         env = os.environ.copy()
+        pyisolate_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        if "env" in self.config:
+            env.update(self.config["env"])
 
         # Get sandbox mode (default: REQUIRED)
         sandbox_mode = self.config.get("sandbox_mode", SandboxMode.REQUIRED)
@@ -336,39 +394,37 @@ class Extension(Generic[T]):
 
         # Check platform for sandbox requirement
         use_sandbox = False
+        is_sealed_worker = self._is_sealed_worker()
+        use_sealed_worker_bwrap = is_sealed_worker
         if sys.platform == "linux":
-            cap = detect_sandbox_capability()
-
             if sandbox_mode == SandboxMode.DISABLED:
-                # User explicitly disabled sandbox - emit LOUD warning
-                logger.warning("=" * 78)
-                logger.warning("SECURITY WARNING: Sandbox DISABLED for extension '%s'", self.name)
-                logger.warning(
-                    "The isolated process will have FULL ACCESS to your filesystem, "
-                    "network, and GPU memory. This is STRONGLY DISCOURAGED for any "
-                    "code you did not write yourself."
-                )
-                logger.warning(
-                    "To enable sandbox protection, remove 'sandbox_mode: disabled' "
-                    "from your extension config."
-                )
-                logger.warning("=" * 78)
                 use_sandbox = False
-            elif not cap.available:
-                # REQUIRED mode (default) but bwrap unavailable - fail loud
-                raise RuntimeError(
-                    f"Process isolation on Linux REQUIRES bubblewrap.\n"
-                    f"Error: {cap.remediation}\n"
-                    f"Details: {cap.restriction_model} - {cap.raw_error}\n\n"
-                    f"If you understand the security risks and want to proceed without "
-                    f"sandbox protection, set sandbox_mode='disabled' in your extension config."
-                )
-            else:
+            elif use_sealed_worker_bwrap:
+                cap = detect_sandbox_capability()
+                if not cap.available:
+                    raise RuntimeError(
+                        f"Process isolation on Linux REQUIRES bubblewrap.\n"
+                        f"Error: {cap.remediation}\n"
+                        f"Details: {cap.restriction_model} - {cap.raw_error}\n\n"
+                        f"If you understand the security risks and want to proceed without "
+                        f"sandbox protection, set sandbox_mode='disabled' in your extension config."
+                    )
                 use_sandbox = True
-
-            # Apply env overrides BEFORE building cmd or bwrap env
-            if "env" in self.config:
-                env.update(self.config["env"])
+            elif is_sealed_worker:
+                use_sandbox = False
+            else:
+                cap = detect_sandbox_capability()
+                if not cap.available:
+                    # REQUIRED mode (default) but bwrap unavailable - fail loud
+                    raise RuntimeError(
+                        f"Process isolation on Linux REQUIRES bubblewrap.\n"
+                        f"Error: {cap.remediation}\n"
+                        f"Details: {cap.restriction_model} - {cap.raw_error}\n\n"
+                        f"If you understand the security risks and want to proceed without "
+                        f"sandbox protection, set sandbox_mode='disabled' in your extension config."
+                    )
+                else:
+                    use_sandbox = True
 
             if use_sandbox:
                 # Build Bwrap Command
@@ -376,21 +432,13 @@ class Extension(Generic[T]):
                 if isinstance(sandbox_config, bool):
                     sandbox_config = {}
 
-                # Detect host site-packages to allow access to Torch/Comfy dependencies
-                import site
+                adapter = None
+                try:
+                    from .adapter_registry import AdapterRegistry
 
-                extra_binds = []
-
-                # Add standard site-packages
-                site_packages = site.getsitepackages()
-                for sp in site_packages:
-                    if os.path.exists(sp):
-                        extra_binds.append(sp)
-
-                # Also add user site-packages just in case
-                user_site = site.getusersitepackages()
-                if isinstance(user_site, str) and os.path.exists(user_site):
-                    extra_binds.append(user_site)
+                    adapter = AdapterRegistry.get()
+                except Exception as exc:
+                    logger.warning("[Extension] Could not load adapter for sandbox paths: %s", exc)
 
                 cmd = build_bwrap_command(
                     python_exe=python_exe,
@@ -401,6 +449,9 @@ class Extension(Generic[T]):
                     allow_gpu=True,  # Default to allowing GPU for ComfyUI nodes
                     restriction_model=cap.restriction_model,
                     env_overrides=self.config.get("env"),
+                    adapter=adapter,
+                    execution_model=self._execution_model(),
+                    sealed_host_ro_paths=cast(list[str] | None, self.config.get("sealed_host_ro_paths")),
                 )
             else:
                 # Linux without sandbox (DISABLED mode)
@@ -410,6 +461,9 @@ class Extension(Generic[T]):
                 env["PYISOLATE_EXTENSION"] = self.name
                 env["PYISOLATE_MODULE_PATH"] = self.module_path
                 env["PYISOLATE_ENABLE_CUDA_IPC"] = "1" if self._cuda_ipc_enabled else "0"
+                if is_sealed_worker:
+                    env["PYTHONPATH"] = pyisolate_root
+                    env["PYTHONNOUSERSITE"] = "1"
 
         else:
             # Non-Linux (Windows/Mac) - Fallback to direct launch
@@ -420,13 +474,23 @@ class Extension(Generic[T]):
             env["PYISOLATE_EXTENSION"] = self.name
             env["PYISOLATE_MODULE_PATH"] = self.module_path
             env["PYISOLATE_ENABLE_CUDA_IPC"] = "1" if self._cuda_ipc_enabled else "0"
+            if is_sealed_worker:
+                env["PYTHONPATH"] = pyisolate_root
+                env["PYTHONNOUSERSITE"] = "1"
+
+        # Tell the child whether to import torch (controls adapter import chain)
+        if not self.config.get("share_torch", False):
+            env["PYISOLATE_IMPORT_TORCH"] = "0"
+            # Also inject into config env for bwrap path which uses env_overrides
+            if "env" not in self.config:
+                self.config["env"] = {}
+            self.config["env"]["PYISOLATE_IMPORT_TORCH"] = "0"
 
         # Launch process
-        # logger.error(f"[BWRAP-DEBUG] Final subprocess.Popen args: {cmd}")
-
         proc = subprocess.Popen(
             cmd,
             env=env,
+            cwd=self.module_path if is_sealed_worker else None,
             stdout=None,  # Inherit stdout/stderr for now so we see logs
             stderr=None,
             close_fds=True,
@@ -461,11 +525,26 @@ class Extension(Generic[T]):
             raise RuntimeError(f"Child connection is None for {self.name}")
 
         # Setup JSON-RPC
+        tensor_transport = self._tensor_transport_mode()
         transport = JSONSocketTransport(client_sock)
+        if hasattr(transport, "set_tensor_transport_mode"):
+            transport.set_tensor_transport_mode(tensor_transport)
         logger.debug("Child connected, sending bootstrap data")
 
         # Send bootstrap
         snapshot = build_extension_snapshot(self.module_path)
+        if is_sealed_worker:
+            snapshot["apply_host_sys_path"] = False
+            snapshot["preferred_root"] = None
+            snapshot["additional_paths"] = []
+            sealed_host_ro_paths = self.config.get("sealed_host_ro_paths") or []
+            snapshot["sealed_host_ro_paths"] = list(cast(list[str], sealed_host_ro_paths))
+            # If RO paths are configured, preserve adapter_ref so the sealed
+            # child can rehydrate the adapter and register serializers.
+            # Without RO paths, null out adapter to maintain hermetic boundary.
+            if not sealed_host_ro_paths:
+                snapshot["adapter_ref"] = None
+                snapshot["adapter_name"] = None
         ext_type_ref = f"{self.extension_type.__module__}.{self.extension_type.__name__}"
 
         # Sanitize config for JSON serialization (convert API classes to string refs)
@@ -481,6 +560,7 @@ class Extension(Generic[T]):
             "snapshot": snapshot,
             "config": safe_config,
             "extension_type_ref": ext_type_ref,
+            "tensor_transport": tensor_transport,
         }
         transport.send(bootstrap_data)
 
@@ -492,3 +572,7 @@ class Extension(Generic[T]):
     def join(self) -> None:
         """Join the child process, blocking until it exits."""
         self.proc.join()
+
+    def register_event_handler(self, name: str, handler: Any) -> None:
+        """Register a handler for named events emitted by the child process."""
+        self._event_bridge.register_handler(name, handler)

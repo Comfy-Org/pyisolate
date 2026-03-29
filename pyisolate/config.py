@@ -45,8 +45,12 @@ class SandboxConfig(TypedDict, total=False):
 class CUDAWheelConfig(TypedDict):
     """Configuration for custom CUDA wheel resolution."""
 
-    index_url: str
-    """Base URL containing per-package simple index directories."""
+    index_url: NotRequired[str]
+    """Base URL containing per-package simple index directories (single index)."""
+
+    index_urls: NotRequired[list[str]]
+    """Multiple index URLs for CUDA wheel resolution (used by conda backend
+    to emit pixi [pypi-options] extra-index-urls)."""
 
     packages: list[str]
     """Canonicalized dependency names that must resolve via the custom index."""
@@ -88,6 +92,24 @@ class ExtensionConfig(TypedDict):
 
     env: dict[str, str]
     """Environment variable overrides for the child process."""
+
+    package_manager: NotRequired[str]
+    """Backend package manager: 'uv' (default) or 'conda'."""
+
+    execution_model: NotRequired[str]
+    """Runtime boundary: 'host-coupled' (default for uv) or 'sealed_worker'."""
+
+    sealed_host_ro_paths: NotRequired[list[str]]
+    """Optional sealed-worker-only absolute host paths to mount read-only for imports."""
+
+    conda_channels: NotRequired[list[str]]
+    """Conda channels to use (required when package_manager='conda')."""
+
+    conda_dependencies: NotRequired[list[str]]
+    """Conda-forge dependency specifications."""
+
+    conda_platforms: NotRequired[list[str]]
+    """Target platforms for conda environment (defaults to current platform)."""
 
     cuda_wheels: NotRequired[CUDAWheelConfig]
     """Optional custom CUDA wheel resolution configuration for selected dependencies."""

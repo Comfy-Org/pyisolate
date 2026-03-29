@@ -3,6 +3,7 @@ import os
 import sys
 from typing import Any
 
+from pyisolate import flush_tensor_keeper
 from pyisolate.shared import ExtensionBase
 
 try:
@@ -33,6 +34,15 @@ class ReferenceTestExtension(ExtensionBase):
 
     async def prepare_shutdown(self) -> None:
         logger.info("[TestPkg] Preparing shutdown.")
+
+    async def stop(self) -> None:
+        try:
+            flush_tensor_keeper()
+            if HAS_TORCH and torch.cuda.is_available():
+                torch.cuda.synchronize()
+                torch.cuda.ipc_collect()
+        finally:
+            await super().stop()
 
     async def ping(self) -> str:
         """Basic connectivity check."""

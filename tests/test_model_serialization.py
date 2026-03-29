@@ -119,3 +119,34 @@ class TestContainerPassthrough:
     async def test_none_passthrough(self) -> None:
         result = await deserialize_from_isolation(None)
         assert result is None
+
+
+class TestOpaqueHandlePreservation:
+    """Pack-local proxy handle tests (issue #58)."""
+
+    async def test_deserialize_preserves_opaque_handle_no_rpc(self) -> None:
+        """RemoteObjectHandle with no handler stays opaque without RPC call."""
+        from unittest.mock import AsyncMock
+
+        from pyisolate._internal.remote_handle import RemoteObjectHandle
+
+        handle = RemoteObjectHandle("test-id", "UnregisteredType")
+        mock_extension = AsyncMock()
+
+        result = await deserialize_from_isolation(handle, extension=mock_extension)
+
+        assert result is handle
+        mock_extension.get_remote_object.assert_not_called()
+
+    async def test_flush_clears_remote_objects(self) -> None:
+        """flush_transport_state() empties remote_objects dict."""
+        from pyisolate.sealed import SealedNodeExtension
+
+        ext = SealedNodeExtension()
+        for i in range(5):
+            ext.remote_objects[f"obj-{i}"] = object()
+        assert len(ext.remote_objects) == 5
+
+        await ext.flush_transport_state()
+
+        assert len(ext.remote_objects) == 0

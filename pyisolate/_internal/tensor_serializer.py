@@ -10,6 +10,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from .perf_trace import record_event, tracing_enabled
 from .torch_gate import require_torch
 
 logger = logging.getLogger(__name__)
@@ -221,7 +222,13 @@ def _install_signal_cleanup_handlers() -> None:
         finally:
             os._exit(128 + signum)
 
-    for sig in (signal.SIGHUP, signal.SIGTERM):
+    cleanup_signals = [
+        getattr(signal, "SIGHUP", None),
+        getattr(signal, "SIGTERM", None),
+    ]
+    for sig in cleanup_signals:
+        if sig is None:
+            continue
         try:
             signal.signal(sig, _handler)
         except Exception:
@@ -231,12 +238,59 @@ def _install_signal_cleanup_handlers() -> None:
 _install_signal_cleanup_handlers()
 
 
-def serialize_tensor(t: Any) -> dict[str, Any]:
-    """Serialize a tensor to JSON-compatible format using shared memory."""
+def serialize_tensor(t: Any, mode: str = "shared_memory") -> dict[str, Any]:
+    """Serialize a tensor for the configured transport mode."""
+    started_at = time.perf_counter()
+    if mode == "json":
+        payload = _serialize_tensor_json(t)
+        _record_tensor_trace(t, mode, started_at)
+        return payload
+
     torch, _ = require_torch("serialize_tensor")
     if t.is_cuda:
-        return _serialize_cuda_tensor(t)
-    return _serialize_cpu_tensor(t)
+        payload = _serialize_cuda_tensor(t)
+        _record_tensor_trace(t, mode, started_at)
+        return payload
+    payload = _serialize_cpu_tensor(t)
+    _record_tensor_trace(t, mode, started_at)
+    return payload
+
+
+def _record_tensor_trace(t: Any, mode: str, started_at: float) -> None:
+    if not tracing_enabled():
+        return
+    try:
+        payload_bytes = int(t.numel()) * int(t.element_size())
+    except Exception:
+        payload_bytes = 0
+    try:
+        device = str(t.device)
+    except Exception:
+        device = "unknown"
+    record_event(
+        {
+            "event_kind": "tensor_transport",
+            "type_name": "Tensor",
+            "serialize_ms": (time.perf_counter() - started_at) * 1000.0,
+            "payload_bytes": payload_bytes,
+            "tensor_transport_mode": mode,
+            "device": device,
+            "process_role": "child" if os.environ.get("PYISOLATE_CHILD") == "1" else "host",
+        }
+    )
+
+
+def _serialize_tensor_json(t: Any) -> dict[str, Any]:
+    """Serialize a tensor into plain JSON data with no shared-memory side effects."""
+    require_torch("JSON tensor serialization")
+    cpu_tensor = t.detach().cpu()
+    return {
+        "__type__": "TensorValue",
+        "dtype": str(cpu_tensor.dtype),
+        "tensor_size": list(cpu_tensor.size()),
+        "requires_grad": bool(getattr(t, "requires_grad", False)),
+        "data": cpu_tensor.tolist(),
+    }
 
 
 def _serialize_cpu_tensor(t: Any) -> dict[str, Any]:
@@ -367,14 +421,41 @@ def _serialize_cuda_tensor(t: Any) -> dict[str, Any]:
     }
 
 
-def deserialize_tensor(data: dict[str, Any]) -> Any:
-    """Deserialize a tensor from TensorRef format."""
-    torch, _ = require_torch("deserialize_tensor")
+def deserialize_tensor(data: dict[str, Any], mode: str = "shared_memory") -> Any:
+    """Deserialize a tensor payload for the configured transport mode."""
+    try:
+        torch, _ = require_torch("deserialize_tensor")
+    except Exception:
+        torch = None
+
     # If this is already a tensor (e.g., passed through by shared memory), return as-is
-    if isinstance(data, torch.Tensor):
+    if torch is not None and isinstance(data, torch.Tensor):
         return data
-    # All formats now use TensorRef
+
+    if data.get("__type__") == "TensorValue" or mode == "json":
+        return _deserialize_json_tensor(data)
+
     return _deserialize_legacy_tensor(data)
+
+
+def _deserialize_json_tensor(data: dict[str, Any]) -> Any:
+    """Deserialize a JSON tensor payload.
+
+    If torch is unavailable in the receiving process, leave the JSON payload intact
+    so sealed workers can still inspect or echo it without importing torch.
+    """
+    try:
+        torch, _ = require_torch("JSON tensor deserialization")
+    except Exception:
+        return data
+
+    dtype_str = data["dtype"]
+    dtype = getattr(torch, dtype_str.split(".")[-1])
+    tensor = torch.tensor(data["data"], dtype=dtype)
+    tensor = tensor.reshape(tuple(data["tensor_size"]))
+    if data.get("requires_grad"):
+        tensor.requires_grad_(True)
+    return tensor
 
 
 def _convert_lists_to_tuples(obj: Any) -> Any:
@@ -465,15 +546,23 @@ def _deserialize_legacy_tensor(data: dict[str, Any]) -> Any:
     raise RuntimeError(f"Unsupported device: {device}")
 
 
-def register_tensor_serializer(registry: Any) -> None:
+def register_tensor_serializer(registry: Any, mode: str = "shared_memory") -> None:
+    def serializer(obj: Any) -> dict[str, Any]:
+        return serialize_tensor(obj, mode=mode)
+
+    def deserializer(data: dict[str, Any]) -> Any:
+        return deserialize_tensor(data, mode=mode)
+
     require_torch("register_tensor_serializer")
+
     # Register both "Tensor" (type name) and "torch.Tensor" (full name) just in case
-    registry.register("Tensor", serialize_tensor, deserialize_tensor)
-    registry.register("torch.Tensor", serialize_tensor, deserialize_tensor)
+    registry.register("Tensor", serializer, deserializer)
+    registry.register("torch.Tensor", serializer, deserializer)
+    registry.register("TensorValue", None, deserializer)
     # Also register TensorRef for deserialization
-    registry.register("TensorRef", None, deserialize_tensor)
+    registry.register("TensorRef", None, deserializer)
     # Register TorchReduction for recursive deserialization
-    registry.register("TorchReduction", None, deserialize_tensor)
+    registry.register("TorchReduction", None, deserializer)
 
     # Register PyTorch atom types for recursive serialization
     def serialize_dtype(obj: Any) -> str:

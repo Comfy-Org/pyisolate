@@ -57,12 +57,18 @@ def build_child_sys_path(
     host_paths: Sequence[str],
     extra_paths: Sequence[str],
     preferred_root: str | None = None,
+    filtered_subdirs: Sequence[str] | None = None,
 ) -> list[str]:
     """Construct ``sys.path`` for an isolated child interpreter.
 
     Host paths retain order, an optional preferred root is prepended, and child
-    venv site-packages are appended while avoiding duplicates and code subdirs
-    that would shadow imports (e.g., package subfolders like ``utils``).
+    venv site-packages are appended while avoiding duplicates. When
+    ``filtered_subdirs`` is provided, those named subdirectories of
+    ``preferred_root`` are excluded from the reconstructed path. When
+    ``filtered_subdirs`` is ``None``, no subdirectory filtering is applied.
+    The caller (typically an :class:`~pyisolate.interfaces.IsolationAdapter`)
+    is responsible for supplying the appropriate list via
+    ``get_path_config()["filtered_subdirs"]``.
     """
 
     def _norm(path: str) -> str:
@@ -74,12 +80,9 @@ def build_child_sys_path(
     ordered_host = list(host_paths)
     if preferred_root:
         root_norm = _norm(preferred_root)
-        code_subdirs = {
-            os.path.join(root_norm, "comfy"),
-            os.path.join(root_norm, "app"),
-            os.path.join(root_norm, "comfy_execution"),
-            os.path.join(root_norm, "utils"),
-        }
+        code_subdirs: set[str] = set()
+        if filtered_subdirs is not None:
+            code_subdirs = {os.path.join(root_norm, name) for name in filtered_subdirs}
         filtered_host = []
         for p in ordered_host:
             p_norm = _norm(p)

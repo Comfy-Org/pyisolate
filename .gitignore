@@ -47,6 +47,7 @@ coverage.xml
 *.py,cover
 .hypothesis/
 .pytest_cache/
+.pytest_artifacts/
 cover/
 
 # Translations
@@ -155,5 +156,5 @@ cython_debug/
 # UV cache directory (for hardlinking optimization)
 .uv_cache/
 
-# Generated demo venvs
-comfy_hello_world/node-venvs/
+# Generated test venvs
+.smoke_venv/
