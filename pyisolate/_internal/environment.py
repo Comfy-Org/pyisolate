@@ -22,6 +22,82 @@ from .cuda_wheels import (
 )
 from .torch_utils import get_torch_ecosystem_packages
 
+
+def validate_backend_config(config: ExtensionConfig) -> None:
+    """Validate backend-specific configuration. Fail loud on invalid combos."""
+    package_manager = config.get("package_manager", "uv")
+    execution_model = config.get("execution_model")
+
+    if execution_model is None:
+        execution_model = "sealed_worker" if package_manager == "conda" else "host-coupled"
+
+    if execution_model not in {"host-coupled", "sealed_worker"}:
+        raise ValueError(
+            f"Unknown execution_model '{execution_model}'. Must be 'host-coupled' or 'sealed_worker'."
+        )
+
+    if config.get("share_cuda_ipc", False) and not config.get("share_torch", False):
+        raise ValueError(
+            "share_cuda_ipc=True requires share_torch=True. "
+            "CUDA IPC cannot be enabled without host torch sharing."
+        )
+
+    if package_manager == "uv" and execution_model == "sealed_worker" and config.get("share_torch", False):
+        raise ValueError(
+            "sealed_worker execution_model requires share_torch=False. "
+            "Sealed workers use explicit RPC serialization rather than host-coupled tensor sharing."
+        )
+
+    sealed_host_ro_paths = config.get("sealed_host_ro_paths")
+    if sealed_host_ro_paths is not None:
+        if execution_model != "sealed_worker":
+            raise ValueError("sealed_host_ro_paths requires execution_model='sealed_worker'.")
+        if not isinstance(sealed_host_ro_paths, list):
+            raise ValueError("sealed_host_ro_paths must be a list of absolute paths.")
+        for path in sealed_host_ro_paths:
+            if not isinstance(path, str) or not path:
+                raise ValueError("sealed_host_ro_paths entries must be non-empty strings.")
+            if not os.path.isabs(path):
+                raise ValueError("sealed_host_ro_paths entries must be absolute paths.")
+
+    if package_manager == "uv":
+        return
+
+    if package_manager != "conda":
+        raise ValueError(f"Unknown package_manager '{package_manager}'. Must be 'uv' or 'conda'.")
+
+    if execution_model != "sealed_worker":
+        raise ValueError(
+            "conda backend requires execution_model='sealed_worker'. "
+            "Conda always runs as a sealed foreign interpreter."
+        )
+
+    # conda + share_torch is incompatible
+    if config.get("share_torch", False):
+        raise ValueError(
+            "conda backend requires share_torch=False. Conda uses its own Python "
+            "interpreter, which is incompatible with zero-copy tensor sharing."
+        )
+
+    # cuda_wheels for conda: resolved post-pixi-install via pip --no-deps
+    # (same wheel resolution as uv, just installed into the pixi env after provisioning)
+
+    # conda requires conda_channels
+    channels = config.get("conda_channels")
+    if not channels:
+        raise ValueError(
+            "conda_channels is required when package_manager='conda'. "
+            "Specify at least one channel (e.g. ['conda-forge'])."
+        )
+
+    # conda requires pixi on PATH
+    if not shutil.which("pixi"):
+        raise ValueError(
+            "pixi is required for conda backend but not found. "
+            "Install: curl -fsSL https://pixi.sh/install.sh | bash"
+        )
+
+
 logger = logging.getLogger(__name__)
 
 _DANGEROUS_PATTERNS = ("&&", "||", "|", "`", "$", "\n", "\r", "\0")
@@ -149,6 +225,7 @@ def build_extension_snapshot(module_path: str) -> dict[str, object]:
             "adapter_name": adapter.identifier if adapter else None,
             "preferred_root": path_config.get("preferred_root"),
             "additional_paths": path_config.get("additional_paths", []),
+            "filtered_subdirs": path_config.get("filtered_subdirs"),
             "context_data": {"module_path": module_path},
         }
     )
@@ -301,6 +378,8 @@ def install_dependencies(venv_path: Path, config: ExtensionConfig, name: str) ->
         )
 
     safe_deps: list[str] = []
+    if config.get("execution_model") == "sealed_worker":
+        safe_deps.append(str(Path(__file__).resolve().parents[2]))
     for dep in config["dependencies"]:
         validate_dependency(dep)
         safe_deps.append(dep)
@@ -339,7 +418,8 @@ def install_dependencies(venv_path: Path, config: ExtensionConfig, name: str) ->
     common_args: list[str] = ["--cache-dir", str(cache_dir)]
 
     torch_spec: str | None = None
-    if not config["share_torch"]:
+    needs_child_torch = not config["share_torch"] and config.get("execution_model") != "sealed_worker"
+    if needs_child_torch:
         import torch
 
         torch_version: str = str(torch.__version__)

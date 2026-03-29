@@ -56,6 +56,7 @@ class ExtensionManager(Generic[T]):
                 super().__init__()
                 self._extension = extension_instance
                 self._proxy: Any = None
+                self._pending_event_handlers: list[tuple[str, Any]] = []
 
             @property
             def proxy(self) -> Any:
@@ -66,6 +67,9 @@ class ExtensionManager(Generic[T]):
                 if self._proxy is None:
                     if hasattr(self._extension, "ensure_process_started"):
                         self._extension.ensure_process_started()
+                    # Re-register event handlers after process restart
+                    for name, handler in self._pending_event_handlers:
+                        self._extension.register_event_handler(name, handler)
                     self._proxy = self._extension.get_proxy()
                     self._initialize_rpc(self._extension.rpc)
                 return self._proxy
@@ -74,6 +78,12 @@ class ExtensionManager(Generic[T]):
                 if hasattr(self._extension, item):
                     return getattr(self._extension, item)
                 return getattr(self.proxy, item)
+
+            def register_event_handler(self, name: str, handler: Any) -> None:
+                """Register a handler for named events from the child process."""
+                self._pending_event_handlers.append((name, handler))
+                if self._extension._process_initialized:
+                    self._extension.register_event_handler(name, handler)
 
         return cast(T, HostExtension(extension))
 

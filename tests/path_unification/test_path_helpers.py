@@ -93,60 +93,66 @@ class TestBuildChildSysPath:
         assert result.count("/host/lib") == 1
         assert result[0] == "/host/lib"
 
-    def test_inserts_comfy_root_first_when_missing(self):
-        """If comfy_root provided and not in host_paths, prepend it."""
+    def test_inserts_preferred_root_first_when_missing(self):
+        """If preferred_root provided and not in host_paths, prepend it."""
         host = ["/host/lib1", "/host/lib2"]
         extras = ["/venv/lib"]
-        comfy_root = os.environ.get("COMFYUI_ROOT") or str(Path.home() / "ComfyUI")
+        preferred = "/myapp/root"
 
-        result = build_child_sys_path(host, extras, comfy_root)
+        result = build_child_sys_path(host, extras, preferred)
 
-        assert result[0] == comfy_root
+        assert result[0] == preferred
         assert result[1:3] == host
 
-    def test_does_not_duplicate_comfy_root_if_present(self):
-        """If comfy_root already in host_paths, don't duplicate it."""
-        comfy_root = os.environ.get("COMFYUI_ROOT") or str(Path.home() / "ComfyUI")
-        host = [comfy_root, "/host/lib1"]
+    def test_does_not_duplicate_preferred_root_if_present(self):
+        """If preferred_root already in host_paths, don't duplicate it."""
+        preferred = "/myapp/root"
+        host = [preferred, "/host/lib1"]
         extras = ["/venv/lib"]
 
-        result = build_child_sys_path(host, extras, comfy_root)
+        result = build_child_sys_path(host, extras, preferred)
 
-        # Should only appear once
-        assert result.count(comfy_root) == 1
-        assert result[0] == comfy_root
+        assert result.count(preferred) == 1
+        assert result[0] == preferred
 
-    def test_removes_comfy_subdirectories_when_root_specified(self):
-        """Subdirectories of comfy_root should be filtered to avoid shadowing."""
-        comfy_root = os.environ.get("COMFYUI_ROOT") or str(Path.home() / "ComfyUI")
-        host = [f"{comfy_root}/comfy", f"{comfy_root}/app", "/host/lib"]
+    def test_filtered_subdirs_removes_named_dirs_when_provided(self):
+        """Subdirectories in filtered_subdirs list should be excluded from output."""
+        root = "/myapp/root"
+        host = [f"{root}/comfy", f"{root}/app", "/host/lib"]
         extras = ["/venv/lib"]
 
-        result = build_child_sys_path(host, extras, comfy_root)
+        result = build_child_sys_path(host, extras, root, filtered_subdirs=["comfy", "app"])
 
-        # ComfyUI root should be first
-        assert result[0] == comfy_root
-        # Subdirectories should be removed
-        assert f"{comfy_root}/comfy" not in result
-        assert f"{comfy_root}/app" not in result
-        # Other paths should remain
+        assert result[0] == root
+        assert f"{root}/comfy" not in result
+        assert f"{root}/app" not in result
         assert "/host/lib" in result
 
-    def test_preserves_venv_site_packages_under_comfy_root(self):
-        """ComfyUI .venv site-packages should NOT be filtered out."""
-        comfy_root = os.environ.get("COMFYUI_ROOT") or str(Path.home() / "ComfyUI")
-        venv_site = f"{comfy_root}/.venv/lib/python3.12/site-packages"
-        host = [f"{comfy_root}/comfy", venv_site, "/host/lib"]
+    def test_filtered_subdirs_none_preserves_all_subdirectory_paths(self):
+        """When filtered_subdirs is None, no subdirectory filtering is applied."""
+        root = "/myapp/root"
+        host = [f"{root}/utils", f"{root}/app", "/host/lib"]
         extras = []
 
-        result = build_child_sys_path(host, extras, comfy_root)
+        result = build_child_sys_path(host, extras, root, filtered_subdirs=None)
 
-        # ComfyUI root should be first
-        assert result[0] == comfy_root
-        # .venv site-packages MUST be preserved
+        assert result[0] == root
+        assert f"{root}/utils" in result
+        assert f"{root}/app" in result
+        assert "/host/lib" in result
+
+    def test_filtered_subdirs_does_not_filter_deep_venv_paths(self):
+        """Paths deeper than one level under preferred_root are not filtered."""
+        root = "/myapp/root"
+        venv_site = f"{root}/.venv/lib/python3.12/site-packages"
+        host = [f"{root}/comfy", venv_site, "/host/lib"]
+        extras = []
+
+        result = build_child_sys_path(host, extras, root, filtered_subdirs=["comfy"])
+
+        assert result[0] == root
         assert venv_site in result
-        # comfy subdir should be removed
-        assert f"{comfy_root}/comfy" not in result
+        assert f"{root}/comfy" not in result
 
     def test_appends_extra_paths(self):
         """Extra paths (isolated venv) should be appended after host paths."""
@@ -227,15 +233,13 @@ class TestIntegration:
             fake_venv = Path(tmpdir) / ".venv" / "lib" / "python3.12" / "site-packages"
             extras = [str(fake_venv)]
 
-            # Build child path
+            # Build child path using tmpdir as preferred_root (host-agnostic synthetic root)
+            preferred = tmpdir
             child_path = build_child_sys_path(
                 snapshot["sys_path"],
                 extras,
-                preferred_root=os.environ.get("COMFYUI_ROOT") or str(Path.home() / "ComfyUI"),
+                preferred_root=preferred,
             )
 
-            # Verify structure - check that preferred_root is present
-            preferred = os.environ.get("COMFYUI_ROOT") or str(Path.home() / "ComfyUI")
             assert preferred in child_path
             assert str(fake_venv) in child_path
-            # Note: child_path may be shorter than snapshot["sys_path"] due to filtering of code subdirs

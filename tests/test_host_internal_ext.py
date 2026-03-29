@@ -14,6 +14,9 @@ class DummyRPC:
     def __init__(self, *args, **kwargs):
         self.run_called = False
 
+    def register_callee(self, obj, object_id):
+        pass
+
     def run(self):
         self.run_called = True
 

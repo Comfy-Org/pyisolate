@@ -10,7 +10,6 @@ SerializerRegistry, which allows adapters to register custom serializers without
 coupling pyisolate to any specific framework.
 """
 
-import contextlib
 import logging
 import os
 import sys
@@ -27,34 +26,24 @@ if TYPE_CHECKING:  # pragma: no cover - typing aids
 logger = logging.getLogger(__name__)
 
 
-def serialize_for_isolation(data: Any) -> Any:
-    """Serialize data for transmission to an isolated process (host side).
-
-    Adapter-registered objects are converted to reference dictionaries so the
-    isolated process can fetch them lazily. RemoteObjectHandle instances are passed
-    through to preserve identity without pickling heavyweight objects.
-    """
+def _serialize_for_isolation_impl(
+    data: Any,
+    *,
+    registry: SerializerRegistry,
+    torch_module: Any,
+    remote_handle_type: type[Any],
+) -> Any:
     type_name = type(data).__name__
 
-    # Adapter-registered serializers take precedence over built-in handlers
-    registry = SerializerRegistry.get_instance()
-    if registry.has_handler(type_name):
-        serializer = registry.get_serializer(type_name)
-        if serializer:
-            return serializer(data)
-
-    # If this object originated as a RemoteObjectHandle, send the original
-    # handle only when no adapter serializer is available for this type.
-    # This avoids cross-extension stale handle reuse for serializer-backed
-    # objects (e.g. CLIP/ModelPatcher/VAE refs).
-    from .remote_handle import RemoteObjectHandle
-
     handle = getattr(data, "_pyisolate_remote_handle", None)
-    if isinstance(handle, RemoteObjectHandle):
+    if isinstance(handle, remote_handle_type):
         return handle
 
-    torch, _ = get_torch_optional()
-    if torch is not None and isinstance(data, torch.Tensor):
+    serializer = registry.get_serializer(type_name)
+    if serializer is not None:
+        return serializer(data)
+
+    if torch_module is not None and isinstance(data, torch_module.Tensor):
         if data.is_cuda:
             if _cuda_ipc_enabled:
                 return data
@@ -62,13 +51,48 @@ def serialize_for_isolation(data: Any) -> Any:
         return data
 
     if isinstance(data, dict):
-        return {k: serialize_for_isolation(v) for k, v in data.items()}
+        return {
+            k: _serialize_for_isolation_impl(
+                v,
+                registry=registry,
+                torch_module=torch_module,
+                remote_handle_type=remote_handle_type,
+            )
+            for k, v in data.items()
+        }
 
     if isinstance(data, (list, tuple)):
-        result = [serialize_for_isolation(item) for item in data]
+        result = [
+            _serialize_for_isolation_impl(
+                item,
+                registry=registry,
+                torch_module=torch_module,
+                remote_handle_type=remote_handle_type,
+            )
+            for item in data
+        ]
         return type(data)(result)
 
     return data
+
+
+def serialize_for_isolation(data: Any) -> Any:
+    """Serialize data for transmission to an isolated process (host side).
+
+    Adapter-registered objects are converted to reference dictionaries so the
+    isolated process can fetch them lazily. RemoteObjectHandle instances are passed
+    through to preserve identity without pickling heavyweight objects.
+    """
+    registry = SerializerRegistry.get_instance()
+    from .remote_handle import RemoteObjectHandle
+
+    torch, _ = get_torch_optional()
+    return _serialize_for_isolation_impl(
+        data,
+        registry=registry,
+        torch_module=torch,
+        remote_handle_type=RemoteObjectHandle,
+    )
 
 
 async def deserialize_from_isolation(data: Any, extension: Any = None, _nested: bool = False) -> Any:
@@ -85,19 +109,13 @@ async def deserialize_from_isolation(data: Any, extension: Any = None, _nested: 
     registry = SerializerRegistry.get_instance()
 
     if isinstance(data, RemoteObjectHandle):
-        if _nested or extension is None:
-            return data
-        if registry.has_handler(data.type_name):
-            return data
-        try:
-            resolved = await extension.get_remote_object(data.object_id)
-            with contextlib.suppress(Exception):
-                resolved._pyisolate_remote_handle = data
-            return resolved
-        except Exception:
-            return data
+        # Handles with a registered handler are returned opaque for the caller
+        # to process.  Handles with NO registered handler are pack-local proxy
+        # handles — keep them opaque so they round-trip back to the originating
+        # child without a wasteful (and doomed) RPC resolution attempt.
+        return data
 
-    # Check for adapter-registered deserializers by type name (e.g., NodeOutput).
+    # Check for adapter-registered deserializers by type name.
     # Only apply to dicts (serialized form). Objects already deserialized by the
     # JSON transport layer (e.g., PLY reconstructed via _json_object_hook) are
     # passed through as-is.

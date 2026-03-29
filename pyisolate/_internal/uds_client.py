@@ -33,6 +33,32 @@ from .torch_gate import get_torch_optional
 logger = logging.getLogger(__name__)
 
 
+def _resolve_api_classes_from_config(config: ExtensionConfig) -> list[Any]:
+    if config.get("execution_model") == "sealed_worker":
+        return []
+
+    apis = config.get("apis", [])
+    resolved_apis = []
+
+    for api_item in apis:
+        if isinstance(api_item, str):
+            try:
+                import importlib
+
+                parts = api_item.rsplit(".", 1)
+                if len(parts) == 2:
+                    mod = importlib.import_module(parts[0])
+                    resolved_apis.append(getattr(mod, parts[1]))
+                else:
+                    logger.warning("Invalid API reference format: %s", api_item)
+            except Exception as e:
+                logger.warning("Failed to resolve API %s: %s", api_item, e)
+        else:
+            resolved_apis.append(api_item)
+
+    return resolved_apis
+
+
 def main() -> None:
     """Main entry point for isolated child processes."""
 
@@ -78,6 +104,9 @@ def main() -> None:
     # Receive bootstrap data from host via JSON
     bootstrap_data = transport.recv()
     logger.debug("Received bootstrap data")
+    tensor_transport = bootstrap_data.get("tensor_transport", "shared_memory")
+    if hasattr(transport, "set_tensor_transport_mode"):
+        transport.set_tensor_transport_mode(tensor_transport)
 
     # Apply host snapshot to environment
     snapshot = bootstrap_data.get("snapshot", {})
@@ -120,6 +149,7 @@ def main() -> None:
             module_path=module_path,
             extension_type=extension_type,
             config=config,
+            tensor_transport=tensor_transport,
         )
     )
 
@@ -129,6 +159,7 @@ async def _async_uds_entrypoint(
     module_path: str,
     extension_type: type[Any],
     config: ExtensionConfig,
+    tensor_transport: str,
 ) -> None:
     """Async entrypoint for isolated processes using JSON-RPC transport."""
     from ..interfaces import IsolationAdapter
@@ -147,9 +178,10 @@ async def _async_uds_entrypoint(
         # Register tensor serializer only when torch is available.
         from .serialization_registry import SerializerRegistry
 
-        register_tensor_serializer(SerializerRegistry.get_instance())
+        register_tensor_serializer(SerializerRegistry.get_instance(), mode=tensor_transport)
         # Ensure file_system strategy for CPU tensors.
-        torch.multiprocessing.set_sharing_strategy("file_system")
+        if tensor_transport == "shared_memory":
+            torch.multiprocessing.set_sharing_strategy("file_system")
     elif config.get("share_torch", False):
         raise RuntimeError(
             "share_torch=True requires PyTorch. Install 'torch' to use tensor-sharing features."
@@ -189,33 +221,16 @@ async def _async_uds_entrypoint(
     with context:
         rpc.register_callee(extension, "extension")
 
-        # Register APIs from config
-        apis = config.get("apis", [])
-        resolved_apis = []
-
-        # Resolve string references back to classes if needed
-        for api_item in apis:
-            if isinstance(api_item, str):
-                try:
-                    import importlib
-
-                    parts = api_item.rsplit(".", 1)
-                    if len(parts) == 2:
-                        mod = importlib.import_module(parts[0])
-                        resolved_apis.append(getattr(mod, parts[1]))
-                    else:
-                        logger.warning("Invalid API reference format: %s", api_item)
-                except Exception as e:
-                    logger.warning("Failed to resolve API %s: %s", api_item, e)
-            else:
-                resolved_apis.append(api_item)
-
-        for api in resolved_apis:
+        for api in _resolve_api_classes_from_config(config):
             api.use_remote(rpc)
             if adapter:
                 api_instance = cast(ProxiedSingleton, getattr(api, "instance", api))
                 logger.debug("Calling handle_api_registration for %s", api_instance.__class__.__name__)
                 adapter.handle_api_registration(api_instance, rpc)
+
+        # Let the adapter wire child-side event hooks (e.g., progress bar)
+        if adapter and hasattr(adapter, "setup_child_event_hooks"):
+            adapter.setup_child_event_hooks(extension)
 
         # Import and load the extension module
         import importlib.util

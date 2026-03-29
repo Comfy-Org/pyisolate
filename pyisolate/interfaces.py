@@ -62,11 +62,22 @@ class IsolationAdapter(Protocol):
     def register_serializers(self, registry: SerializerRegistryProtocol) -> None:
         """Register custom type serializers for RPC transport."""
 
+    def setup_web_directory(self, module: Any) -> None:
+        """Detect and populate web directory for a loaded module."""
+
     def provide_rpc_services(self) -> list[type[ProxiedSingleton]]:
         """Return ProxiedSingleton classes to expose via RPC."""
 
     def handle_api_registration(self, api: ProxiedSingleton, rpc: AsyncRPC) -> None:
         """Optional post-registration hook for API-specific setup."""
+
+    def setup_child_event_hooks(self, extension: Any) -> None:
+        """Wire child-side event hooks (e.g., progress bar) using the extension's emit_event.
+
+        Called once in the child process after the extension is initialized and RPC
+        is available. The extension's ``emit_event(name, payload)`` method should be
+        used to forward UI events to host-registered handlers.
+        """
 
     def get_sandbox_system_paths(self) -> list[str] | None:
         """Return additional system paths for sandbox.

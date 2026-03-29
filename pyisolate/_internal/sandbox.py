@@ -55,6 +55,17 @@ GPU_PASSTHROUGH_PATTERNS: list[str] = [
     "dri",  # Direct Rendering Infrastructure
 ]
 
+FORBIDDEN_WRITABLE_BIND_PATHS: frozenset[str] = frozenset({"/tmp"})
+
+
+def _linuxbrew_root(path: Path) -> str | None:
+    """Return the Linuxbrew root for a path under ``.../.linuxbrew/...``."""
+    parts = path.parts
+    if ".linuxbrew" not in parts:
+        return None
+    idx = parts.index(".linuxbrew")
+    return str(Path(*parts[: idx + 1]))
+
 
 def _validate_adapter_path(path: str) -> bool:
     """Validate that an adapter-provided path doesn't weaken sandbox security.
@@ -90,6 +101,8 @@ def build_bwrap_command(
     restriction_model: RestrictionModel = RestrictionModel.NONE,
     env_overrides: dict[str, str] | None = None,
     adapter: "IsolationAdapter | None" = None,
+    execution_model: str = "host-coupled",
+    sealed_host_ro_paths: list[str] | None = None,
 ) -> list[str]:
     """Build the bubblewrap command for launching a sandboxed process.
 
@@ -119,6 +132,7 @@ def build_bwrap_command(
         sandbox_config = {}
 
     cmd = ["bwrap"]
+    is_sealed_worker = execution_model == "sealed_worker"
 
     # Namespace Isolation Logic
     # -------------------------
@@ -152,15 +166,52 @@ def build_bwrap_command(
     # Start with default paths
     system_paths = list(SANDBOX_SYSTEM_PATHS)
 
-    # Query adapter for additional paths (safe access for structural typing)
-    get_adapter_paths = getattr(adapter, "get_sandbox_system_paths", lambda: None)
-    adapter_paths = get_adapter_paths()
-    if adapter_paths:
-        for path in adapter_paths:
-            if _validate_adapter_path(path):
-                system_paths.append(path)
-            else:
-                logger.warning("Adapter path '%s' rejected: would weaken sandbox security", path)
+    # Always explicitly bind the python base prefix to ensure the interpreter
+    # and its lib dependencies are accessible if installed in non-standard locations (e.g. linuxbrew)
+    if sys.base_prefix not in system_paths:
+        system_paths.append(sys.base_prefix)
+
+    # uv-created venv interpreters can be symlinks into a non-standard
+    # installation prefix (for example Homebrew/Linuxbrew cellar paths).
+    # Bind that resolved prefix too, or bwrap will fail to exec the venv's
+    # python binary even though the venv itself is mounted.
+    python_path = Path(python_exe)
+    try:
+        if python_path.is_symlink():
+            raw_link_target = os.readlink(python_exe)
+            raw_link_path = Path(raw_link_target)
+            if not raw_link_path.is_absolute():
+                raw_link_path = (python_path.parent / raw_link_path).resolve()
+            raw_python_prefix = str(raw_link_path.parent.parent)
+            if raw_python_prefix not in system_paths:
+                system_paths.append(raw_python_prefix)
+            raw_linuxbrew_root = _linuxbrew_root(raw_link_path)
+            if raw_linuxbrew_root and raw_linuxbrew_root not in system_paths:
+                system_paths.append(raw_linuxbrew_root)
+    except OSError:
+        pass
+
+    try:
+        resolved_python_path = python_path.resolve()
+        resolved_python_prefix = str(resolved_python_path.parent.parent)
+        if resolved_python_prefix not in system_paths:
+            system_paths.append(resolved_python_prefix)
+        resolved_linuxbrew_root = _linuxbrew_root(resolved_python_path)
+        if resolved_linuxbrew_root and resolved_linuxbrew_root not in system_paths:
+            system_paths.append(resolved_linuxbrew_root)
+    except OSError:
+        pass
+
+    if not is_sealed_worker:
+        # Query adapter for additional paths only for host-coupled execution.
+        get_adapter_paths = getattr(adapter, "get_sandbox_system_paths", lambda: None)
+        adapter_paths = get_adapter_paths()
+        if adapter_paths:
+            for path in adapter_paths:
+                if _validate_adapter_path(path):
+                    system_paths.append(path)
+                else:
+                    logger.warning("Adapter path '%s' rejected: would weaken sandbox security", path)
 
     for sys_path in system_paths:
         if os.path.exists(sys_path):
@@ -172,6 +223,12 @@ def build_bwrap_command(
     # Module path: READ-ONLY
     cmd.extend(["--ro-bind", str(module_path), str(module_path)])
 
+    if is_sealed_worker and sealed_host_ro_paths:
+        for ro_path in sealed_host_ro_paths:
+            normalized = os.path.normpath(ro_path)
+            if os.path.exists(normalized):
+                cmd.extend(["--ro-bind", normalized, normalized])
+
     # GPU passthrough (if enabled)
     if allow_gpu:
         cmd.extend(["--ro-bind", "/sys", "/sys"])
@@ -180,11 +237,12 @@ def build_bwrap_command(
         # Start with default GPU patterns
         gpu_patterns = list(GPU_PASSTHROUGH_PATTERNS)
 
-        # Query adapter for additional GPU patterns (safe access)
-        get_gpu_patterns = getattr(adapter, "get_sandbox_gpu_patterns", lambda: None)
-        adapter_gpu_patterns = get_gpu_patterns()
-        if adapter_gpu_patterns:
-            gpu_patterns.extend(adapter_gpu_patterns)
+        if not is_sealed_worker:
+            # Query adapter for additional GPU patterns only for host-coupled execution.
+            get_gpu_patterns = getattr(adapter, "get_sandbox_gpu_patterns", lambda: None)
+            adapter_gpu_patterns = get_gpu_patterns()
+            if adapter_gpu_patterns:
+                gpu_patterns.extend(adapter_gpu_patterns)
 
         for pattern in gpu_patterns:
             for dev in dev_path.glob(pattern):
@@ -225,40 +283,28 @@ def build_bwrap_command(
 
     # MOVED: path bindings moved to end to prevent masking by RO binds
 
-    # 1. Host venv site-packages: READ-ONLY (for share_torch inheritance via .pth file)
-    # The child venv has a .pth file pointing to host site-packages for torch sharing
-    # We find where 'torch' is likely installed (host site-packages)
-    host_site_packages = Path(sys.executable).parent.parent / "lib"
-    for sp in host_site_packages.glob("python*/site-packages"):
-        if sp.exists():
-            cmd.extend(["--ro-bind", str(sp), str(sp)])
-            break
+    pyisolate_path: Path | None = None
+    if not is_sealed_worker:
+        # 1. Host venv site-packages: READ-ONLY (for share_torch inheritance via .pth file)
+        # The child venv has a .pth file pointing to host site-packages for torch sharing
+        # We find where 'torch' is likely installed (host site-packages)
+        host_site_packages = Path(sys.executable).parent.parent / "lib"
+        for sp in host_site_packages.glob("python*/site-packages"):
+            if sp.exists():
+                cmd.extend(["--ro-bind", str(sp), str(sp)])
+                break
 
-    # 2. PyIsolate package path: READ-ONLY (needed for sandbox_client/uds_client)
-    import pyisolate as pyisolate_pkg
+        # 2. PyIsolate package path: READ-ONLY (needed for sandbox_client/uds_client)
+        import pyisolate as pyisolate_pkg
 
-    pyisolate_path = Path(pyisolate_pkg.__file__).parent.parent.resolve()
-    cmd.extend(["--ro-bind", str(pyisolate_path), str(pyisolate_path)])
+        pyisolate_path = Path(pyisolate_pkg.__file__).parent.parent.resolve()
+        cmd.extend(["--ro-bind", str(pyisolate_path), str(pyisolate_path)])
 
-    # 3. ComfyUI package path: READ-ONLY (needed for comfy.isolation.adapter)
-    try:
-        import comfy  # type: ignore[import]
+        # Application paths (e.g., ComfyUI) are provided by the adapter via
+        # get_sandbox_system_paths() at lines 161-166. No direct framework imports.
 
-        if hasattr(comfy, "__file__") and comfy.__file__:
-            comfy_path = Path(comfy.__file__).parent.parent.resolve()
-        elif hasattr(comfy, "__path__"):
-            # Namespace package support
-            comfy_path = Path(list(comfy.__path__)[0]).parent.resolve()
-        else:
-            comfy_path = None
-
-        if comfy_path:
-            cmd.extend(["--ro-bind", str(comfy_path), str(comfy_path)])
-    except Exception:
-        pass
-
-    # Shared Memory (REQUIRED for zero-copy tensors via SharedMemory Lease)
-    if Path("/dev/shm").exists():
+    # Shared memory is only needed for host-coupled shared-memory tensor transport.
+    if not is_sealed_worker and Path("/dev/shm").exists():
         cmd.extend(["--bind", "/dev/shm", "/dev/shm"])
 
     # UDS socket directory must be accessible
@@ -281,6 +327,10 @@ def build_bwrap_command(
     # 1. Writable paths from config (user-specified)
     # Placed here so they can punch holes in RO binds (e.g. ComfyUI/temp inside RO ComfyUI)
     for path in sandbox_config.get("writable_paths", []):
+        normalized_path = os.path.normpath(path)
+        if normalized_path in FORBIDDEN_WRITABLE_BIND_PATHS:
+            logger.warning("Skipping forbidden writable sandbox path: %s", normalized_path)
+            continue
         if os.path.exists(path):
             cmd.extend(["--bind", path, path])
 
@@ -295,49 +345,72 @@ def build_bwrap_command(
             if os.path.exists(src):
                 cmd.extend(["--ro-bind", src, dst])
 
+    if is_sealed_worker:
+        cmd.append("--clearenv")
+
     # Environment variables
     cmd.extend(["--setenv", "PYISOLATE_UDS_ADDRESS", uds_address])
     cmd.extend(["--setenv", "PYISOLATE_CHILD", "1"])
+    # Propagate PYISOLATE_IMPORT_TORCH from env_overrides if set
+    if env_overrides and env_overrides.get("PYISOLATE_IMPORT_TORCH") == "0":
+        cmd.extend(["--setenv", "PYISOLATE_IMPORT_TORCH", "0"])
 
-    # 4. Set PYTHONPATH to include pyisolate package
-    # This ensures the child can find 'pyisolate' even if not installed in its venv
-    pyisolate_parent = str(pyisolate_path)
-    # Start with our explicitly bound package
-    new_pythonpath_parts = [pyisolate_parent]
+    if is_sealed_worker:
+        # Hermetic sealed workers get an explicit env allowlist.
+        for env_var in ["PATH", "LANG", "LC_ALL", "CUDA_HOME", "CUDA_PATH", "CUDA_VISIBLE_DEVICES"]:
+            if env_var in os.environ:
+                cmd.extend(["--setenv", env_var, os.environ[env_var]])
+        if "NVIDIA_VISIBLE_DEVICES" in os.environ:
+            cmd.extend(["--setenv", "NVIDIA_VISIBLE_DEVICES", os.environ["NVIDIA_VISIBLE_DEVICES"]])
+        if "LD_LIBRARY_PATH" in os.environ:
+            cmd.extend(["--setenv", "LD_LIBRARY_PATH", os.environ["LD_LIBRARY_PATH"]])
+        if "PYTORCH_CUDA_ALLOC_CONF" in os.environ:
+            cmd.extend(["--setenv", "PYTORCH_CUDA_ALLOC_CONF", os.environ["PYTORCH_CUDA_ALLOC_CONF"]])
+        if "TORCH_CUDA_ARCH_LIST" in os.environ:
+            cmd.extend(["--setenv", "TORCH_CUDA_ARCH_LIST", os.environ["TORCH_CUDA_ARCH_LIST"]])
+        cmd.extend(["--setenv", "HOME", "/tmp"])
+        cmd.extend(["--setenv", "TMPDIR", "/tmp"])
+        cmd.extend(["--setenv", "PYTHONNOUSERSITE", "1"])
+    else:
+        # Set PYTHONPATH to include pyisolate package
+        # This ensures the child can find 'pyisolate' even if not installed in its venv
+        pyisolate_parent = str(pyisolate_path)
+        # Start with our explicitly bound package
+        new_pythonpath_parts = [pyisolate_parent]
 
-    # Check existing PYTHONPATH
-    existing_pythonpath = os.environ.get("PYTHONPATH", "")
-    if existing_pythonpath:
-        new_pythonpath_parts.append(existing_pythonpath)
+        # Check existing PYTHONPATH
+        existing_pythonpath = os.environ.get("PYTHONPATH", "")
+        if existing_pythonpath:
+            new_pythonpath_parts.append(existing_pythonpath)
 
-    cmd.extend(["--setenv", "PYTHONPATH", ":".join(new_pythonpath_parts)])
+        cmd.extend(["--setenv", "PYTHONPATH", ":".join(new_pythonpath_parts)])
 
-    # Inherit select environment variables
-    # Standard environment
-    for env_var in ["PATH", "HOME", "LANG", "LC_ALL"]:
-        if env_var in os.environ:
-            cmd.extend(["--setenv", env_var, os.environ[env_var]])
+        # Inherit select environment variables
+        # Standard environment
+        for env_var in ["PATH", "HOME", "LANG", "LC_ALL"]:
+            if env_var in os.environ:
+                cmd.extend(["--setenv", env_var, os.environ[env_var]])
 
-    # CUDA/GPU environment variables (critical for GPU access)
-    cuda_env_vars = [
-        "CUDA_HOME",
-        "CUDA_PATH",
-        "CUDA_VISIBLE_DEVICES",
-        "NVIDIA_VISIBLE_DEVICES",
-        "LD_LIBRARY_PATH",
-        "PYTORCH_CUDA_ALLOC_CONF",
-        "TORCH_CUDA_ARCH_LIST",
-        "PYISOLATE_ENABLE_CUDA_IPC",
-        "PYISOLATE_ENABLE_CUDA_IPC",
-    ]
-    for env_var in cuda_env_vars:
-        if env_var in os.environ:
-            cmd.extend(["--setenv", env_var, os.environ[env_var]])
+        # CUDA/GPU environment variables (critical for GPU access)
+        cuda_env_vars = [
+            "CUDA_HOME",
+            "CUDA_PATH",
+            "CUDA_VISIBLE_DEVICES",
+            "NVIDIA_VISIBLE_DEVICES",
+            "LD_LIBRARY_PATH",
+            "PYTORCH_CUDA_ALLOC_CONF",
+            "TORCH_CUDA_ARCH_LIST",
+            "PYISOLATE_ENABLE_CUDA_IPC",
+            "PYISOLATE_ENABLE_CUDA_IPC",
+        ]
+        for env_var in cuda_env_vars:
+            if env_var in os.environ:
+                cmd.extend(["--setenv", env_var, os.environ[env_var]])
 
-    # Coverage / Profiling forwarding
-    for key, val in os.environ.items():
-        if key.startswith(("COV_", "COVERAGE_")):
-            cmd.extend(["--setenv", key, val])
+        # Coverage / Profiling forwarding
+        for key, val in os.environ.items():
+            if key.startswith(("COV_", "COVERAGE_")):
+                cmd.extend(["--setenv", key, val])
 
     # Env overrides from config
     if env_overrides:

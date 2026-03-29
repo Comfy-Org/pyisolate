@@ -39,11 +39,12 @@ from ._internal.singleton_context import singleton_scope
 from ._internal.tensor_serializer import flush_tensor_keeper, purge_orphan_sender_shm_files
 from .config import ExtensionConfig, ExtensionManagerConfig, SandboxMode
 from .host import ExtensionBase, ExtensionManager
+from .sealed import SealedNodeExtension
 
 if TYPE_CHECKING:
     from .interfaces import IsolationAdapter
 
-__version__ = "0.9.1"
+__version__ = "0.10.0"
 
 __all__ = [
     "ExtensionBase",
@@ -51,6 +52,7 @@ __all__ = [
     "ExtensionManagerConfig",
     "ExtensionConfig",
     "SandboxMode",
+    "SealedNodeExtension",
     "ProxiedSingleton",
     "local_execution",
     "singleton_scope",

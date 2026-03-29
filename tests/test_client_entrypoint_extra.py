@@ -1,9 +1,10 @@
+import importlib
 import sys
 from types import ModuleType
 
 import pytest
 
-from pyisolate._internal import client
+from pyisolate._internal import client, uds_client
 from pyisolate._internal.rpc_protocol import ProxiedSingleton
 from pyisolate.config import ExtensionConfig
 from pyisolate.shared import ExtensionBase
@@ -204,3 +205,25 @@ async def test_async_entrypoint_registers_apis_with_adapter(monkeypatch, tmp_pat
 
     assert DummyAPI.last_rpc is not None
     assert dummy_adapter.calls
+
+
+def test_sealed_worker_skips_api_class_import(monkeypatch):
+    config = {
+        "name": "demo-sealed",
+        "dependencies": [],
+        "share_torch": False,
+        "share_cuda_ipc": False,
+        "execution_model": "sealed_worker",
+        "apis": ["forbidden.module.ForbiddenAPI"],
+    }
+
+    def _forbidden_import(name: str, package: str | None = None):  # noqa: ARG001
+        if name == "forbidden.module":
+            raise AssertionError("sealed worker must not import API classes from config")
+        return importlib.import_module(name)
+
+    monkeypatch.setattr(importlib, "import_module", _forbidden_import)
+
+    resolved = uds_client._resolve_api_classes_from_config(config)
+
+    assert resolved == []

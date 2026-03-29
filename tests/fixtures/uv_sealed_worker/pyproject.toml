@@ -1,0 +1,10 @@
+[project]
+name = "uv-sealed-worker"
+version = "0.1.0"
+dependencies = ["boltons"]
+
+[tool.pyisolate]
+can_isolate = true
+package_manager = "uv"
+execution_model = "sealed_worker"
+share_torch = false

@@ -1,6 +1,7 @@
 import os
 import sys
 import tempfile
+from pathlib import Path
 
 import pytest
 
@@ -82,3 +83,26 @@ async def test_module_path_ro(reference_host):
         write_success = False
 
     assert not write_success, "Module path should be mounted Read-Only"
+
+
+@pytest.mark.asyncio
+async def test_host_tmp_marker_hidden_from_child(reference_host):
+    """Verify host /tmp is hidden while child /tmp remains writable."""
+    host_marker = Path(tempfile.mkstemp(prefix="pyisolate_host_tmp_", dir="/tmp")[1])
+    child_scratch = "/tmp/child_scratch.txt"
+
+    try:
+        host_marker.write_text("host-only", encoding="utf-8")
+
+        ext = reference_host.load_test_extension("tmp_privacy", isolated=True)
+        proxy = ext.get_proxy()
+
+        with pytest.raises(Exception, match="No such file or directory"):
+            await proxy.read_file(str(host_marker))
+
+        assert await proxy.write_file(child_scratch, "child-only") == "ok"
+        assert await proxy.read_file(child_scratch) == "child-only"
+        assert not Path(child_scratch).exists(), "Child /tmp scratch leaked into host /tmp"
+    finally:
+        if host_marker.exists():
+            host_marker.unlink()

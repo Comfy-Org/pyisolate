@@ -4,7 +4,7 @@
 
 > 🚨 **Fail Loud Policy**: pyisolate assumes the rest of ComfyUI core is correct. Missing prerequisites or runtime failures immediately raise descriptive exceptions instead of being silently ignored.
 
-pyisolate enables you to run Python extensions with conflicting dependencies in the same application by automatically creating isolated virtual environments for each extension using `uv`. Extensions communicate with the host process through a transparent RPC system, making the isolation invisible to your code while keeping the host environment dependency-free.
+pyisolate enables you to run Python extensions with conflicting dependencies in the same application by automatically creating isolated environments for each extension. The default provisioner uses `uv`, and ComfyUI integrations can also provision a conda environment through `pixi` when an extension needs conda-first packages. Extensions communicate with the host process through a transparent RPC system, making the isolation invisible to your code while keeping the host environment dependency-free.
 
 ## Requirements
 
@@ -86,6 +86,7 @@ The script installs `uv`, creates the dev venv, installs pyisolate in editable m
 
 - 🔒 **Dependency Isolation**: Run extensions with incompatible dependencies (e.g., numpy 1.x and 2.x) in the same application
 - 🚀 **Zero-Copy PyTorch Tensor Sharing**: Share PyTorch tensors between processes without serialization overhead
+- 📦 **Multiple Environment Backends**: Use `uv` by default or a conda/pixi environment when the extension needs conda-native dependencies
 - 🔄 **Transparent Communication**: Call async methods across process boundaries as if they were local
 - 🎯 **Simple API**: Clean, intuitive interface with minimal boilerplate
 - ⚡ **Fast**: Uses `uv` for blazing-fast virtual environment creation
@@ -184,6 +185,66 @@ extension = manager.load_extension(
 large_tensor = torch.randn(1000, 1000)
 mean = await extension.process_tensor(large_tensor)
 ```
+
+### Execution Model Axis
+
+ComfyUI integrations now treat environment provisioning and runtime boundary as separate choices:
+
+- `package_manager = "uv"` or `package_manager = "conda"` chooses how the child environment is built
+- `execution_model = "host-coupled"` or `execution_model = "sealed_worker"` chooses how much host runtime state the child may inherit
+
+`host-coupled` remains the default for the classic `uv` path. `sealed_worker` is the foreign-interpreter path: no host `sys.path` reconstruction, no host framework runtime imports as a crutch, JSON-RPC tensor transport, and no sandbox in this phase.
+
+### UV Backend for Sealed Workers
+
+ComfyUI extensions can also request a sealed `uv` worker explicitly:
+
+```toml
+[project]
+name = "uv-sealed-node"
+version = "0.1.0"
+dependencies = ["boltons"]
+
+[tool.comfy.isolation]
+can_isolate = true
+package_manager = "uv"
+execution_model = "sealed_worker"
+share_torch = false
+```
+
+Trade-offs for `package_manager = "uv"` with `execution_model = "sealed_worker"`:
+
+- `share_torch` must be `False`
+- tensors cross the boundary through JSON-compatible RPC values instead of shared-memory tensor handles
+- host `sys.path` reconstruction is disabled
+- host framework runtime imports such as `comfy.isolation.extension_wrapper` must not be required in the child
+- `bwrap` sandboxing is intentionally disabled in this phase
+
+### Conda Backend for Sealed Workers
+
+ComfyUI extensions can declare a conda-backed isolated environment in `pyproject.toml`:
+
+```toml
+[project]
+name = "weather-node"
+version = "0.1.0"
+dependencies = ["xarray", "cfgrib"]
+
+[tool.comfy.isolation]
+can_isolate = true
+package_manager = "conda"
+share_torch = false
+conda_channels = ["conda-forge"]
+conda_dependencies = ["eccodes", "cfgrib"]
+```
+
+Trade-offs for `package_manager = "conda"`:
+
+- `share_torch` is forced `False`
+- `bwrap` sandboxing is skipped
+- the child uses its own interpreter instead of the host Python
+- the child is treated as a sealed foreign runtime and must not import host framework runtime code through leaked `sys.path`
+- tensor transfer crosses the RPC boundary as JSON-compatible values instead of shared-memory tensor handles
 
 ### Shared State with Singletons
 

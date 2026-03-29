@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pyisolate"
-version = "0.9.2"
+version = "0.10.0"
 description = "A Python library for dividing execution across multiple virtual environments"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -126,11 +126,14 @@ disallow_untyped_defs = true
 
 [tool.pytest.ini_options]
 minversion = "6.0"
-addopts = "-ra -q --cov=pyisolate --cov-report=html --cov-report=term-missing"
+addopts = "-ra -q --cov=pyisolate --cov-report=html --cov-report=term-missing -m 'not network'"
 testpaths = ["tests"]
 asyncio_mode = "auto"
 filterwarnings = [
     "ignore:The pynvml package is deprecated:FutureWarning",
+]
+markers = [
+    "network: tests that require network access to external wheel indices",
 ]
 
 [tool.coverage.run]

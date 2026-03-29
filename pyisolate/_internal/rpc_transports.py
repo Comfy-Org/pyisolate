@@ -107,10 +107,14 @@ class JSONSocketTransport:
     Used for ALL Linux isolation modes (sandbox and non-sandbox).
     """
 
-    def __init__(self, sock: socket.socket) -> None:
+    def __init__(self, sock: socket.socket, tensor_transport: str = "shared_memory") -> None:
         self._sock = sock
         self._lock = threading.Lock()
         self._recv_lock = threading.Lock()
+        self._tensor_transport = tensor_transport
+
+    def set_tensor_transport_mode(self, tensor_transport: str) -> None:
+        self._tensor_transport = tensor_transport
 
     def send(self, obj: Any) -> None:
         """Serialize to JSON with length prefix."""
@@ -149,7 +153,7 @@ class JSONSocketTransport:
                 raise ValueError(f"Message too large: {msg_len} bytes")
             if msg_len > 100 * 1024 * 1024:  # 100MB — flag large payloads
                 logger.warning(
-                    "Large RPC message: %.1fMB — consider SHM-backed transfer for this type",
+                    "Large RPC message: %.1fMB",
                     msg_len / (1024 * 1024),
                 )
             data = self._recvall(msg_len)
@@ -248,6 +252,21 @@ class JSONSocketTransport:
                 "type_name": obj.type_name,
             }
 
+        # Handle numpy types (scalars and arrays) — must be before torch check
+        try:
+            import numpy as np
+
+            if isinstance(obj, np.integer):
+                return int(obj)  # type: ignore[arg-type]
+            if isinstance(obj, np.floating):
+                return float(obj)  # type: ignore[arg-type]
+            if isinstance(obj, np.bool_):
+                return bool(obj)  # type: ignore[arg-type]
+            if isinstance(obj, np.ndarray):
+                return obj.tolist()
+        except ImportError:
+            pass
+
         # Handle PyTorch tensors BEFORE __dict__ check (tensors have __dict__ but shouldn't use it)
         try:
             import torch
@@ -255,7 +274,7 @@ class JSONSocketTransport:
             if isinstance(obj, torch.Tensor):
                 from .tensor_serializer import serialize_tensor
 
-                return serialize_tensor(obj)
+                return serialize_tensor(obj, mode=self._tensor_transport)
         except ImportError:
             pass
 
@@ -355,39 +374,36 @@ class JSONSocketTransport:
 
             return RemoteObjectHandle(dct["object_id"], dct["type_name"])
 
-        # Generic Registry Lookup for __type__
-        if "__type__" in dct:
-            type_name = dct["__type__"]
-            # Skip TensorRef here as it has special handling below (or generic can handle it if registered)
-            if type_name != "TensorRef":
-                from .serialization_registry import SerializerRegistry
-
-                registry = SerializerRegistry.get_instance()
-                deserializer = registry.get_deserializer(type_name)
-                if deserializer:
-                    try:
-                        return deserializer(dct)
-                    except Exception as e:
-                        # Log error but don't crash - return dict as fallback
-                        logger.warning(f"Failed to deserialize {type_name}: {e}")
-
-        # Handle TensorRef - deserialize tensors during JSON parsing
-        if dct.get("__type__") == "TensorRef":
-            from .serialization_registry import SerializerRegistry
-
-            registry = SerializerRegistry.get_instance()
-            if registry.has_handler("TensorRef"):
-                deserializer = registry.get_deserializer("TensorRef")
-                if deserializer:
-                    return deserializer(dct)
-            # Fallback: direct import if registry not yet populated
+        # Handle Tensor payloads during JSON parsing
+        if dct.get("__type__") in {"TensorRef", "TensorValue"}:
             try:
                 from .tensor_serializer import deserialize_tensor
 
-                return deserialize_tensor(dct)
+                return deserialize_tensor(dct, mode=self._tensor_transport)
             except Exception:
-                pass
-            return dct  # Last resort fallback
+                return dct
+
+        # Generic Registry Lookup for __type__
+        if "__type__" in dct:
+            type_name = dct["__type__"]
+            from .serialization_registry import SerializerRegistry
+
+            registry = SerializerRegistry.get_instance()
+            deserializer = registry.get_deserializer(type_name)
+            if deserializer:
+                try:
+                    return deserializer(dct)
+                except Exception as e:
+                    logger.error(
+                        "Deserialization failed for __type__=%s: %s",
+                        type_name,
+                        e,
+                    )
+                    raise
+            if type_name == "TensorRef":
+                deserializer = registry.get_deserializer("TensorRef")
+                if deserializer:
+                    return deserializer(dct)
 
         # Reconstruct Enums
         if dct.get("__pyisolate_enum__"):

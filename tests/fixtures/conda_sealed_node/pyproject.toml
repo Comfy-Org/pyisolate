@@ -1,0 +1,11 @@
+[project]
+name = "conda-sealed-node"
+version = "0.1.0"
+dependencies = ["packaging"]
+
+[tool.pyisolate]
+can_isolate = true
+package_manager = "conda"
+share_torch = false
+conda_channels = ["conda-forge"]
+conda_dependencies = ["boltons"]

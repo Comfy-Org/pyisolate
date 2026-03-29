@@ -14,6 +14,7 @@ Supported restriction models:
 from __future__ import annotations
 
 import logging
+import os
 import shutil
 import subprocess
 import sys
@@ -140,28 +141,28 @@ def _test_bwrap(bwrap_path: str) -> tuple[bool, str]:
     """
     try:
         # S603: bwrap_path comes from shutil.which(), not user input
+        cmd = [
+            bwrap_path,
+            "--unshare-user-try",
+            "--dev",
+            "/dev",
+            "--proc",
+            "/proc",
+            "--ro-bind",
+            "/usr",
+            "/usr",
+            "--ro-bind",
+            "/bin",
+            "/bin",
+            "--ro-bind",
+            "/lib",
+            "/lib",
+        ]
+        if os.path.exists("/lib64"):
+            cmd.extend(["--ro-bind", "/lib64", "/lib64"])
+        cmd.append("/usr/bin/true")
         result = subprocess.run(  # noqa: S603
-            [
-                bwrap_path,
-                "--unshare-user-try",
-                "--dev",
-                "/dev",
-                "--proc",
-                "/proc",
-                "--ro-bind",
-                "/usr",
-                "/usr",
-                "--ro-bind",
-                "/bin",
-                "/bin",
-                "--ro-bind",
-                "/lib",
-                "/lib",
-                "--ro-bind",
-                "/lib64",
-                "/lib64",
-                "/usr/bin/true",
-            ],
+            cmd,
             capture_output=True,
             timeout=10,
         )
@@ -182,27 +183,27 @@ def _test_bwrap_degraded(bwrap_path: str) -> tuple[bool, str]:
     """
     try:
         # S603: bwrap_path comes from shutil.which(), not user input
+        cmd = [
+            bwrap_path,
+            "--dev",
+            "/dev",
+            "--proc",
+            "/proc",
+            "--ro-bind",
+            "/usr",
+            "/usr",
+            "--ro-bind",
+            "/bin",
+            "/bin",
+            "--ro-bind",
+            "/lib",
+            "/lib",
+        ]
+        if os.path.exists("/lib64"):
+            cmd.extend(["--ro-bind", "/lib64", "/lib64"])
+        cmd.append("/usr/bin/true")
         result = subprocess.run(  # noqa: S603
-            [
-                bwrap_path,
-                "--dev",
-                "/dev",
-                "--proc",
-                "/proc",
-                "--ro-bind",
-                "/usr",
-                "/usr",
-                "--ro-bind",
-                "/bin",
-                "/bin",
-                "--ro-bind",
-                "/lib",
-                "/lib",
-                "--ro-bind",
-                "/lib64",
-                "/lib64",
-                "/usr/bin/true",
-            ],
+            cmd,
             capture_output=True,
             timeout=10,
         )

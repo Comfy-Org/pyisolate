@@ -9,16 +9,22 @@ from urllib.request import urlopen
 
 from packaging.markers import default_environment
 from packaging.requirements import InvalidRequirement, Requirement
-from packaging.tags import sys_tags
+from packaging.tags import Tag, compatible_tags, cpython_tags, sys_tags
 from packaging.utils import canonicalize_name, parse_wheel_filename
 from packaging.version import Version
 
 from ..config import CUDAWheelConfig
 
 _TORCH_VERSION_RE = re.compile(r"^(?P<major>\d+)\.(?P<minor>\d+)")
+# TODO: Resolve on a single naming convention with Andrea's cuda-wheels index.
+# Currently two conventions coexist:
+#   - dotted:   cu130torch2.10  (Andrea's index for torch >= 2.10)
+#   - nodot:    cu130torch210   (older wheels, some other indices)
+# Both patterns accept either form; _matches_runtime normalizes the captured
+# torch group by stripping dots before comparison.
 _CUDA_LOCAL_PATTERNS = (
-    re.compile(r"(^|[.-])cu(?P<cuda>\d+)torch(?P<torch>\d+)([.-]|$)"),
-    re.compile(r"(^|[.-])pt(?P<torch>\d+)cu(?P<cuda>\d+)([.-]|$)"),
+    re.compile(r"(^|[.-])cu(?P<cuda>\d+)torch(?P<torch>\d+(?:\.\d+)?)([.-]|$)"),
+    re.compile(r"(^|[.-])pt(?P<torch>\d+(?:\.\d+)?)cu(?P<cuda>\d+)([.-]|$)"),
 )
 
 
@@ -55,7 +61,23 @@ def _parse_major_minor(version_text: str, label: str) -> str:
     return f"{match.group('major')}.{match.group('minor')}"
 
 
-def get_cuda_wheel_runtime() -> CUDAWheelRuntime:
+def _tags_for_python(target_python: tuple[int, int] | None = None) -> list[Tag]:
+    """Return wheel compatibility tags for a target Python version.
+
+    When ``target_python`` is ``None``, returns tags for the running
+    interpreter via ``sys_tags()``.  Otherwise generates CPython +
+    compatible tags for the specified ``(major, minor)`` tuple.
+    """
+    if target_python is None:
+        return list(sys_tags())
+    return list(cpython_tags(python_version=target_python)) + list(
+        compatible_tags(python_version=target_python)
+    )
+
+
+def get_cuda_wheel_runtime(
+    target_python: tuple[int, int] | None = None,
+) -> CUDAWheelRuntime:
     try:
         import torch
     except ImportError as exc:
@@ -75,7 +97,7 @@ def get_cuda_wheel_runtime() -> CUDAWheelRuntime:
         "torch_nodot": torch_version.replace(".", ""),
         "cuda": cuda_major_minor,
         "cuda_nodot": cuda_major_minor.replace(".", ""),
-        "python_tags": [str(tag) for tag in sys_tags()],
+        "python_tags": [str(tag) for tag in _tags_for_python(target_python)],
     }
 
 
@@ -91,12 +113,24 @@ def get_cuda_wheel_runtime_descriptor() -> dict[str, object]:
 
 
 def _normalize_cuda_wheel_config(config: CUDAWheelConfig) -> CUDAWheelConfig:
+    index_urls = config.get("index_urls")
     index_url = config.get("index_url")
     packages = config.get("packages")
     package_map = config.get("package_map", {})
 
-    if not isinstance(index_url, str) or not index_url.strip():
-        raise CUDAWheelResolutionError("cuda_wheels.index_url must be a non-empty string")
+    # Accept index_urls (plural list) or index_url (singular string).
+    # Normalize to index_urls (list) internally.
+    if index_urls is not None:
+        if not isinstance(index_urls, list) or not all(isinstance(u, str) and u.strip() for u in index_urls):
+            raise CUDAWheelResolutionError("cuda_wheels.index_urls must be a list of non-empty strings")
+        normalized_urls = [u.rstrip("/") + "/" for u in index_urls]
+    elif isinstance(index_url, str) and index_url.strip():
+        normalized_urls = [index_url.rstrip("/") + "/"]
+    else:
+        raise CUDAWheelResolutionError(
+            "cuda_wheels requires either index_url (string) or index_urls (list of strings)"
+        )
+
     if not isinstance(packages, list) or not all(
         isinstance(package_name, str) and package_name.strip() for package_name in packages
     ):
@@ -113,7 +147,7 @@ def _normalize_cuda_wheel_config(config: CUDAWheelConfig) -> CUDAWheelConfig:
         normalized_map[canonicalize_name(dependency_name)] = index_package_name.strip()
 
     return {
-        "index_url": index_url.rstrip("/") + "/",
+        "index_urls": normalized_urls,
         "packages": [canonicalize_name(package_name) for package_name in packages],
         "package_map": normalized_map,
     }
@@ -168,58 +202,67 @@ def _matches_runtime(local_version: str | None, runtime: CUDAWheelRuntime) -> bo
         match = pattern.search(normalized_local)
         if not match:
             continue
-        if match.group("torch") == runtime["torch_nodot"] and match.group("cuda") == runtime["cuda_nodot"]:
+        torch_match = match.group("torch").replace(".", "") == runtime["torch_nodot"]
+        cuda_match = match.group("cuda") == runtime["cuda_nodot"]
+        if torch_match and cuda_match:
             return True
     return False
 
 
 def resolve_cuda_wheel_url(
-    requirement: Requirement, config: CUDAWheelConfig, runtime: CUDAWheelRuntime | None = None
+    requirement: Requirement,
+    config: CUDAWheelConfig,
+    runtime: CUDAWheelRuntime | None = None,
+    *,
+    target_python: tuple[int, int] | None = None,
 ) -> str:
     normalized_config = _normalize_cuda_wheel_config(config)
     dependency_name = canonicalize_name(requirement.name)
-    runtime_info = runtime or get_cuda_wheel_runtime()
-    supported_tag_list = list(sys_tags())
+    runtime_info = runtime or get_cuda_wheel_runtime(target_python=target_python)
+    supported_tag_list = _tags_for_python(target_python)
     supported_tags = set(supported_tag_list)
     tag_rank = {tag: idx for idx, tag in enumerate(supported_tag_list)}
     fetch_attempted = False
     candidates: list[tuple[Version, int, str]] = []
 
-    for package_name in _candidate_package_names(dependency_name, normalized_config.get("package_map", {})):
-        page_url = urljoin(normalized_config["index_url"], package_name.rstrip("/") + "/")
-        html = _fetch_index_html(page_url)
-        if html is None:
-            continue
-        fetch_attempted = True
-        for wheel_url in _parse_index_links(page_url, html):
-            parsed_url = urlparse(wheel_url)
-            wheel_filename = unquote(parsed_url.path.rsplit("/", 1)[-1])
-            if not wheel_filename.endswith(".whl"):
+    for base_url in normalized_config["index_urls"]:
+        for package_name in _candidate_package_names(
+            dependency_name, normalized_config.get("package_map", {})
+        ):
+            page_url = urljoin(base_url, package_name.rstrip("/") + "/")
+            html = _fetch_index_html(page_url)
+            if html is None:
                 continue
-            try:
-                wheel_name, wheel_version, _, wheel_tags = parse_wheel_filename(wheel_filename)
-            except ValueError:
-                continue
-            if canonicalize_name(wheel_name) != dependency_name:
-                continue
-            matching_tags = wheel_tags.intersection(supported_tags)
-            if not matching_tags:
-                continue
-            if not _matches_runtime(getattr(wheel_version, "local", None), runtime_info):
-                continue
-            if requirement.specifier and wheel_version not in requirement.specifier:
-                continue
-            candidates.append(
-                (
-                    wheel_version,
-                    min(tag_rank[tag] for tag in matching_tags),
-                    _normalize_wheel_url(wheel_url),
+            fetch_attempted = True
+            for wheel_url in _parse_index_links(page_url, html):
+                parsed_url = urlparse(wheel_url)
+                wheel_filename = unquote(parsed_url.path.rsplit("/", 1)[-1])
+                if not wheel_filename.endswith(".whl"):
+                    continue
+                try:
+                    wheel_name, wheel_version, _, wheel_tags = parse_wheel_filename(wheel_filename)
+                except ValueError:
+                    continue
+                if canonicalize_name(wheel_name) != dependency_name:
+                    continue
+                matching_tags = wheel_tags.intersection(supported_tags)
+                if not matching_tags:
+                    continue
+                if not _matches_runtime(getattr(wheel_version, "local", None), runtime_info):
+                    continue
+                if requirement.specifier and wheel_version not in requirement.specifier:
+                    continue
+                candidates.append(
+                    (
+                        wheel_version,
+                        min(tag_rank[tag] for tag in matching_tags),
+                        _normalize_wheel_url(wheel_url),
+                    )
                 )
-            )
 
     if not fetch_attempted:
         raise CUDAWheelResolutionError(
-            f"No CUDA wheel index page found for '{requirement.name}' under {normalized_config['index_url']}"
+            f"No CUDA wheel index page found for '{requirement.name}' under {normalized_config['index_urls']}"
         )
     if not candidates:
         raise CUDAWheelResolutionError(
@@ -231,11 +274,16 @@ def resolve_cuda_wheel_url(
     return candidates[-1][2]
 
 
-def resolve_cuda_wheel_requirements(requirements: list[str], config: CUDAWheelConfig) -> list[str]:
+def resolve_cuda_wheel_requirements(
+    requirements: list[str],
+    config: CUDAWheelConfig,
+    *,
+    target_python: tuple[int, int] | None = None,
+) -> list[str]:
     normalized_config = _normalize_cuda_wheel_config(config)
     configured_packages = set(normalized_config["packages"])
     environment = cast(dict[str, str], default_environment())
-    runtime = get_cuda_wheel_runtime()
+    runtime = get_cuda_wheel_runtime(target_python=target_python)
     resolved_requirements: list[str] = []
 
     for dependency in requirements:
@@ -267,6 +315,8 @@ def resolve_cuda_wheel_requirements(requirements: list[str], config: CUDAWheelCo
             resolved_requirements.append(dependency)
             continue
 
-        resolved_requirements.append(resolve_cuda_wheel_url(requirement, normalized_config, runtime))
+        resolved_requirements.append(
+            resolve_cuda_wheel_url(requirement, normalized_config, runtime, target_python=target_python)
+        )
 
     return resolved_requirements

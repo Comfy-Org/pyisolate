@@ -73,6 +73,8 @@ class ReferenceHost:
     def __init__(self, use_temp_dir: bool = True):
         self.temp_dir: tempfile.TemporaryDirectory | None = None
         self.root_dir: Path = Path(os.getcwd())
+        self._had_previous_tmpdir = "TMPDIR" in os.environ
+        self._previous_tmpdir = os.environ.get("TMPDIR")
         if use_temp_dir:
             self.temp_dir = tempfile.TemporaryDirectory(prefix="pyisolate_harness_")
             self.root_dir = Path(self.temp_dir.name)
@@ -163,7 +165,7 @@ class ReferenceHost:
             isolated=isolated,
             dependencies=deps,
             apis=[],
-            env={},
+            env={"PYISOLATE_SIGNAL_CLEANUP": "1"},
             share_torch=share_torch,
             share_cuda_ipc=share_cuda,
             sandbox=sandbox_cfg,
@@ -188,18 +190,29 @@ class ReferenceHost:
         # Stop processes
         for ext in self.extensions:
             try:
+                with contextlib.suppress(Exception):
+                    proxy = ext.get_proxy()
+                    await proxy.stop()
                 ext.stop()
             except Exception as e:
                 cleanup_errors.append(str(e))
 
         if self._adapter_registered:
             AdapterRegistry.unregister()
+            self._adapter_registered = False
 
         if self.temp_dir:
             try:
                 self.temp_dir.cleanup()
+                self.temp_dir = None
             except Exception as e:
                 cleanup_errors.append(f"temp_dir: {e}")
+
+        if self._had_previous_tmpdir:
+            assert self._previous_tmpdir is not None
+            os.environ["TMPDIR"] = self._previous_tmpdir
+        else:
+            os.environ.pop("TMPDIR", None)
 
         if cleanup_errors:
             pass
