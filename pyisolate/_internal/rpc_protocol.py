@@ -275,16 +275,30 @@ class AsyncRPC:
         self.blocking_future.set_result(None)
 
     def shutdown(self) -> None:
-        """Signal intent to stop RPC. Suppresses connection errors."""
+        """Signal intent to stop RPC. Cleanly unblocks threads and joins them."""
         self._stopping = True
-        # If we have a blocking future, we can try to set it to unblock run_until_stopped
-        # This is best-effort since we might be in a different thread
+
+        # Unblock the _send_thread
+        self.outbox.put(None)
+
+        # Unblock the _recv_thread by closing the transport
+        if hasattr(self, "_transport"):
+            with contextlib.suppress(Exception):
+                self._transport.close()
+
+        # Unblock run_until_stopped
         if self.blocking_future and not self.blocking_future.done():
             try:
                 loop = self._get_valid_loop(self.default_loop)
                 loop.call_soon_threadsafe(self.blocking_future.set_result, None)
             except (RuntimeError, Exception):
                 pass
+
+        # Join daemon threads for clean exit
+        if hasattr(self, "_threads"):
+            for t in self._threads:
+                if t.is_alive() and t is not threading.current_thread():
+                    t.join(timeout=2.0)
 
     def run(self) -> None:
         self.blocking_future = self.default_loop.create_future()
@@ -446,6 +460,14 @@ class AsyncRPC:
                                 calling_loop.call_soon_threadsafe(
                                     fut.set_exception, ConnectionError(error_msg)
                                 )
+
+                    # Resolve blocking_future to unblock run_until_stopped
+                    if self.blocking_future and not self.blocking_future.done():
+                        try:
+                            loop = self._get_valid_loop(self.default_loop)
+                            loop.call_soon_threadsafe(self.blocking_future.set_result, None)
+                        except RuntimeError:
+                            pass
                     break
 
                 if item is None:

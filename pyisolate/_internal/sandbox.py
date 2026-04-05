@@ -300,7 +300,7 @@ def build_bwrap_command(
         pyisolate_path = Path(pyisolate_pkg.__file__).parent.parent.resolve()
         cmd.extend(["--ro-bind", str(pyisolate_path), str(pyisolate_path)])
 
-        # Application paths (e.g., ComfyUI) are provided by the adapter via
+        # Application paths are provided by the adapter via
         # get_sandbox_system_paths() at lines 161-166. No direct framework imports.
 
     # Shared memory is only needed for host-coupled shared-memory tensor transport.
@@ -325,7 +325,7 @@ def build_bwrap_command(
     # ---------------------------------------------------------------------------
 
     # 1. Writable paths from config (user-specified)
-    # Placed here so they can punch holes in RO binds (e.g. ComfyUI/temp inside RO ComfyUI)
+    # Placed here so they can punch holes in RO binds (e.g. app/temp inside RO app)
     for path in sandbox_config.get("writable_paths", []):
         normalized_path = os.path.normpath(path)
         if normalized_path in FORBIDDEN_WRITABLE_BIND_PATHS:

@@ -28,10 +28,10 @@ if "received from another process" in str(e):
 
 **Behavior**: `FileNotFoundError` on deserialization.
 
-**Handling**: `TensorKeeper` holds tensor references for 30 seconds:
+**Handling**: `TensorKeeper` holds tensor references for 5.0 seconds:
 ```python
 class TensorKeeper:
-    def __init__(self, retention_seconds: float = 30.0):
+    def __init__(self, retention_seconds: float = 5.0):
         # Keeps strong references to prevent GC
 ```
 

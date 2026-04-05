@@ -37,7 +37,7 @@ def _ensure_bootstrap() -> None:
     """Bootstrap the child environment on first call.
 
     Deferred to avoid circular imports during module initialization.
-    The adapter loads ComfyUI modules which try to import pyisolate,
+    The adapter loads host application modules which try to import pyisolate,
     but pyisolate's __init__ might not be fully initialized yet.
     """
     global _adapter, _bootstrap_done
