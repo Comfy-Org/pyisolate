@@ -4,7 +4,7 @@ Guidance for AI agents maintaining the pyisolate codebase.
 
 ## Identity
 
-**pyisolate** is a Python library (PyPI: `pyisolate`, v0.10.0) for running extensions in isolated virtual environments with seamless inter-process communication. It provides dependency isolation, zero-copy tensor transfer, and bubblewrap sandboxing for GPU-heavy workloads.
+**pyisolate** is a Python library (PyPI: `pyisolate`, v0.10.1) for running extensions in isolated virtual environments with seamless inter-process communication. It provides dependency isolation, zero-copy tensor transfer, and bubblewrap sandboxing for GPU-heavy workloads.
 
 License: MIT | Python: >=3.10
 
