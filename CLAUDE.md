@@ -56,7 +56,7 @@ License: MIT | Python: >=3.10
 
 ```bash
 # Environment setup
-uv venv && source .venv/bin/activate && uv pip install -e ".[dev]"
+uv venv && source .venv/bin/activate && uv pip install -e ".[dev,test]"
 pre-commit install
 
 # Testing
@@ -76,7 +76,7 @@ python -m build
 
 Exported from `pyisolate/__init__.py`:
 
-```
+```text
 ExtensionBase           ExtensionManager        ExtensionManagerConfig
 ExtensionConfig         SandboxMode             SealedNodeExtension
 ProxiedSingleton        local_execution         singleton_scope
