@@ -25,6 +25,7 @@ BWRAP_AVAILABLE = os.name == "nt" or shutil.which("bwrap") is not None
 pytestmark = [
     pytest.mark.skipif(not UV_AVAILABLE, reason="uv not on PATH"),
     pytest.mark.skipif(not BWRAP_AVAILABLE, reason="bwrap not on PATH"),
+    pytest.mark.network,
 ]
 
 
@@ -108,7 +109,11 @@ async def test_uv_sealed_runtime_uses_toolkit_fixture_without_host_leakage() -> 
             )
             print(f"child venv pyisolate install:\n{pip_show.stdout}")
             assert "pyisolate" in pip_show.stdout, "pyisolate not installed in child venv"
-            assert "0.10.1" in pip_show.stdout, "pyisolate version mismatch in child venv"
+            from importlib.metadata import version as _meta_version
+            expected_version = _meta_version("pyisolate")
+            assert expected_version in pip_show.stdout, (
+                f"pyisolate version mismatch: expected {expected_version} in child venv"
+            )
         proxy = ext.get_proxy()
 
         nodes = await proxy.list_nodes()

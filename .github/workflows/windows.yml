@@ -42,7 +42,7 @@ jobs:
       run: |
         .venv\Scripts\activate
         cd example\torch_share
-        python host.py -v
+        python host.py
 
   test-windows-pytorch:
     name: Test on Windows with PyTorch

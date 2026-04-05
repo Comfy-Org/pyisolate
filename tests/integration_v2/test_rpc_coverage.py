@@ -26,9 +26,11 @@ def _run(coro):
 @pytest.fixture
 def host():
     h = ReferenceHost()
-    h.setup()
-    yield h
-    _run(h.cleanup())
+    try:
+        h.setup()
+        yield h
+    finally:
+        _run(h.cleanup())
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="Extension loading requires Linux UDS")
@@ -64,8 +66,6 @@ class TestSealedWorkerRPC:
         from tests.harness.test_package import ReferenceTestExtension
 
         pyisolate_root = Path(__file__).resolve().parents[2]
-        package_path = Path(ReferenceTestExtension.__module__.replace(".", "/")).resolve()
-        # Use the test_package path from the harness
         import tests.harness.test_package as tp
 
         package_path = str(Path(tp.__file__).parent.resolve())
