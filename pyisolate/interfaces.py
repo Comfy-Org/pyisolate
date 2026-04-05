@@ -1,7 +1,7 @@
 """Public adapter and registry protocols for PyIsolate plugins.
 
 These interfaces define the contract between PyIsolate core and application-
-specific adapters (e.g., ComfyUI). They enable structural typing so adapters can
+specific adapters. They enable structural typing so adapters can
 be implemented without inheriting from concrete base classes.
 """
 
@@ -46,7 +46,7 @@ class IsolationAdapter(Protocol):
 
     @property
     def identifier(self) -> str:
-        """Unique adapter identifier (e.g., "comfyui")."""
+        """Unique adapter identifier (e.g., "myapp")."""
 
     def get_path_config(self, module_path: str) -> dict[str, Any] | None:
         """Compute path configuration from extension module path.

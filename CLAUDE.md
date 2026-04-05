@@ -1,130 +1,124 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Guidance for AI agents maintaining the pyisolate codebase.
 
-## Project Overview
+## Identity
 
-**pyisolate** is a Python library for running extensions across multiple isolated virtual environments with RPC communication. It solves dependency conflicts by isolating extensions in separate venvs while maintaining seamless host-extension communication through AsyncRPC.
+**pyisolate** is a Python library (PyPI: `pyisolate`, v0.10.1) for running extensions in isolated virtual environments with seamless inter-process communication. It provides dependency isolation, zero-copy tensor transfer, and bubblewrap sandboxing for GPU-heavy workloads.
 
-## Development Commands
-
-### Environment Setup
-```bash
-# Preferred (using uv - much faster)
-uv venv && source .venv/bin/activate && uv pip install -e ".[dev,docs]"
-pre-commit install
-
-# With benchmarking dependencies
-uv pip install -e ".[dev,docs,bench]"
-
-# Alternative (using pip)
-python -m venv venv && source venv/bin/activate && pip install -e ".[dev,docs]"
-```
-
-### Testing
-```bash
-# Run all tests
-pytest
-
-# Run with coverage
-pytest --cov=pyisolate --cov-report=html --cov-report=term-missing
-
-# Run integration tests
-pytest tests/test_integration.py -v
-
-# Test the working example
-cd example && python main.py -v
-```
-
-### Benchmarking
-```bash
-# Install benchmark dependencies
-uv pip install -e ".[bench]"
-
-# Run full benchmark suite
-python benchmark.py
-
-# Quick benchmarks (fewer iterations)
-python benchmark.py --quick
-
-# Skip torch benchmarks
-python benchmark.py --no-torch
-
-# Run benchmarks via pytest
-pytest tests/test_benchmarks.py -v -s
-```
-
-### Code Quality
-```bash
-# Lint and format
-ruff check pyisolate tests
-ruff format pyisolate tests
-
-# All quality checks
-tox -e lint
-```
-
-### Build
-```bash
-# Build package
-python -m build
-
-# Build docs
-cd docs && make html
-```
+License: MIT | Python: >=3.10
 
 ## Architecture
 
-### Core Components
-- **ExtensionManager**: Manages multiple extensions and their isolated venvs
-- **ExtensionBase**: Base class for extensions with lifecycle hooks (`before_module_loaded`, `on_module_loaded`)
-- **AsyncRPC**: Inter-process communication system with context-aware call tracking
-- **ProxiedSingleton**: Enables shared APIs across processes (like `DatabaseSingleton` in example)
+### Public API (`pyisolate/`)
 
-Note: The example uses a two-level pattern where `ExampleExtensionBase` handles the lifecycle hooks and creates actual extension instances that implement `initialize()`, `prepare_shutdown()`, and custom methods like `do_stuff()`.
+| File | Purpose |
+|------|---------|
+| `__init__.py` | Package exports: `ExtensionBase`, `ExtensionManager`, `ExtensionConfig`, `SandboxMode`, `ProxiedSingleton`, `SealedNodeExtension`, adapter registration |
+| `host.py` | `ExtensionManager` — creates/manages isolated extensions and their venvs |
+| `shared.py` | `ExtensionBase` / `ExtensionLocal` — base classes with lifecycle hooks (`before_module_loaded`, `on_module_loaded`) |
+| `sealed.py` | `SealedNodeExtension` — minimal extension for sealed workers (no host framework imports) |
+| `config.py` | TypedDicts: `ExtensionManagerConfig`, `ExtensionConfig`, `SandboxConfig`, `CUDAWheelConfig`. Enum: `SandboxMode` |
+| `interfaces.py` | `IsolationAdapter` and `SerializerRegistryProtocol` — structural typing protocols for application adapters |
+| `path_helpers.py` | Host `sys.path` serialization and child-side reconstruction |
 
-### Key Directories
-- `pyisolate/`: Main package with public API in `__init__.py`
-- `pyisolate/_internal/`: Core implementation (RPC, process management)
-- `example/`: Working demo with 3 extensions showcasing dependency conflicts
-- `tests/`: Integration and edge case tests
+### Internal (`pyisolate/_internal/`)
 
-### Extension Workflow
-1. ExtensionManager creates isolated venv per extension
-2. Installs extension-specific dependencies
-3. Launches extension in separate process via `_internal/client.py`
-4. Establishes bidirectional RPC communication
-5. Extensions can call host methods and shared singletons transparently
+| File | Purpose |
+|------|---------|
+| `rpc_protocol.py` | `AsyncRPC` engine, `ProxiedSingleton` metaclass, `LocalMethodRegistry` |
+| `rpc_transports.py` | `JSONSocketTransport` (primary) — length-prefixed JSON over UDS. No pickle. `QueueTransport` (legacy) |
+| `rpc_serialization.py` | Message structures: `RPCRequest`, `RPCResponse`, `RPCCallback` |
+| `serialization_registry.py` | `SerializerRegistry` — O(1) type lookup, MRO chain, `data_type` flag |
+| `tensor_serializer.py` | Zero-copy tensors via `/dev/shm` (CPU) and CUDA IPC (GPU). `TensorKeeper` (5.0s default retention) |
+| `model_serialization.py` | Generic `serialize_for_isolation()` / `deserialize_from_isolation()` |
+| `host.py` | `Extension` class — process lifecycle (venv → deps → launch → RPC → shutdown) |
+| `bootstrap.py` | Child-side init: sys.path reconstruction, adapter rehydration |
+| `uds_client.py` | Child entrypoint (`python -m pyisolate._internal.uds_client`) |
+| `environment.py` | uv venv creation, dependency installation, torch package exclusion |
+| `environment_conda.py` | pixi/conda environment creation, fingerprint caching |
+| `cuda_wheels.py` | CUDA wheel resolver — probes host torch/CUDA, fetches matching wheels |
+| `sandbox.py` | `build_bwrap_command()` — deny-by-default filesystem, GPU passthrough, sealed-worker `--clearenv` |
+| `sandbox_detect.py` | Multi-distro detection: RHEL, Ubuntu AppArmor, SELinux, Arch |
+| `event_bridge.py` | Child-to-host event dispatch |
+| `perf_trace.py` | Structured event logging (`PYISOLATE_TRACE_FILE`) |
 
-## Configuration
+### Other Directories
 
-### Python Support
-3.9 - 3.12 (tested in CI)
+| Directory | Purpose |
+|-----------|---------|
+| `tests/` | Unit and integration tests (pytest, ~50 test functions) |
+| `example/` | Working 3-extension demo showing dependency isolation (numpy 1.x vs 2.x) |
+| `benchmarks/` | RPC overhead and memory benchmarks with cross-platform runner scripts |
+| `docs/` | Reference docs: RPC protocol, debugging, edge cases, platform compatibility |
 
-### Dependencies
-- **Runtime**: None (pure Python)
-- **Development**: pytest, ruff, pre-commit
-- **Testing**: torch>=2.0.0, numpy (for `share_torch` and tensor tests)
-- **Benchmarking**: torch, numpy, psutil, tabulate (for performance measurement)
+## Development Commands
 
-### Key Config Files
-- `pyproject.toml`: Project metadata, dependencies, tool configuration
-- `tox.ini`: Multi-Python testing environments
-- `.pre-commit-config.yaml`: Git hooks for code quality
+```bash
+# Environment setup
+uv venv && source .venv/bin/activate && uv pip install -e ".[dev,test]"
+pre-commit install
 
-## Special Features
+# Testing
+pytest                                    # all tests with coverage
+pytest tests/test_rpc_contract.py -v      # specific test file
+pytest -k "test_sandbox" -v               # pattern match
 
-### Dependency Isolation
-Each extension gets its own venv - handles conflicting packages like numpy 1.x vs 2.x (demonstrated in example).
+# Code quality
+ruff check pyisolate tests
+ruff format pyisolate tests
 
-### PyTorch Sharing
-Use `share_torch: true` in extension config to share PyTorch models across processes for memory efficiency.
+# Build
+python -m build
+```
 
-### RPC Patterns
-- Extensions can call host methods recursively (host→extension→host)
-- Shared singletons work transparently via RPC proxying
-- Context tracking prevents circular calls
+## Public API Surface
 
-## Testing Notes
+Exported from `pyisolate/__init__.py`:
 
-The test suite covers real venv creation, dependency conflicts, and RPC edge cases. The `example/` directory provides a working demonstration with 3 extensions that showcase the core functionality.
+```text
+ExtensionBase           ExtensionManager        ExtensionManagerConfig
+ExtensionConfig         SandboxMode             SealedNodeExtension
+ProxiedSingleton        local_execution         singleton_scope
+flush_tensor_keeper     purge_orphan_sender_shm_files
+register_adapter        get_adapter
+```
+
+Everything in `_internal/` is private implementation. Do not expose internal types in public API changes.
+
+## Isolation Modes
+
+| Mode | Provisioner | share_torch | Tensor Transport |
+|:-----|:------------|:------------|:-----------------|
+| cuda_share | uv | yes | CUDA IPC + `/dev/shm` |
+| torch_share | uv | yes | `/dev/shm` only |
+| json_share | uv | no | JSON serialization |
+| sealed_worker | uv or pixi | no | JSON serialization |
+
+Invalid: pixi + `share_torch=True`. Invalid: `share_cuda_ipc=True` without `share_torch=True`.
+
+## Testing Conventions
+
+- Tests live in `tests/` with `test_` prefix
+- Integration tests that create real venvs are slow (~30s each)
+- Tests marked `@pytest.mark.network` require external network access
+- `pytest --cov=pyisolate` for coverage (configured in pyproject.toml)
+- No tests should import from `_internal/` unless testing internal behavior
+
+## Environment Variables
+
+| Variable | Purpose |
+|----------|---------|
+| `PYISOLATE_CHILD` | `"1"` in child processes |
+| `PYISOLATE_DEBUG_RPC` | `"1"` for verbose RPC logging |
+| `PYISOLATE_TRACE_FILE` | Path for structured perf trace JSONL output |
+| `PYISOLATE_ENABLE_CUDA_IPC` | `"1"` to enable CUDA IPC tensor transport |
+| `PYISOLATE_PATH_DEBUG` | `"1"` for sys.path logging during child init |
+| `PYISOLATE_ENFORCE_SANDBOX` | Force bwrap sandboxing |
+
+## Key Invariants
+
+- No pickle anywhere in the transport layer — JSON-RPC only
+- Library is application-agnostic — no references to specific integrations in library code
+- Fail loud — surface failures immediately, no silent degradation
+- `_internal/` is private — public API goes through `__init__.py` exports
