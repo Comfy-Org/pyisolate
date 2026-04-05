@@ -379,7 +379,10 @@ def install_dependencies(venv_path: Path, config: ExtensionConfig, name: str) ->
 
     safe_deps: list[str] = []
     if config.get("execution_model") == "sealed_worker":
-        safe_deps.append(str(Path(__file__).resolve().parents[2]))
+        from importlib.metadata import version as _pkg_version
+
+        _pyisolate_ver = _pkg_version("pyisolate")
+        safe_deps.append(f"pyisolate=={_pyisolate_ver}")
     for dep in config["dependencies"]:
         validate_dependency(dep)
         safe_deps.append(dep)

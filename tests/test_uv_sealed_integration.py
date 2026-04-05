@@ -7,6 +7,7 @@ import gc
 import os
 import shutil
 import site
+import subprocess
 import sys
 import uuid
 from pathlib import Path
@@ -85,12 +86,29 @@ async def test_uv_sealed_runtime_uses_toolkit_fixture_without_host_leakage() -> 
         with pytest.MonkeyPatch.context() as monkeypatch:
             monkeypatch.setenv("PATH", uv_path)
             monkeypatch.setenv("PYISOLATE_ARTIFACT_DIR", str(run_dir / "artifacts"))
+            wheel_index = "https://pollockjj.github.io/wheels/"
+            monkeypatch.setenv("UV_EXTRA_INDEX_URL", wheel_index)
+            print(f"UV_EXTRA_INDEX_URL={wheel_index}")
             try:
                 ext.ensure_process_started()
             except RuntimeError as exc:
                 if "bubblewrap" in str(exc).lower():
                     pytest.skip(f"bwrap unavailable on this platform: {exc}")
                 raise
+            # Verify pyisolate was installed in the child venv from the published index
+            if os.name == "nt":
+                child_python = Path(ext.venv_path) / "Scripts" / "python.exe"
+            else:
+                child_python = Path(ext.venv_path) / "bin" / "python3"
+            pip_show = subprocess.run(
+                [str(child_python), "-m", "pip", "show", "pyisolate"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            print(f"child venv pyisolate install:\n{pip_show.stdout}")
+            assert "pyisolate" in pip_show.stdout, "pyisolate not installed in child venv"
+            assert "0.10.1" in pip_show.stdout, "pyisolate version mismatch in child venv"
         proxy = ext.get_proxy()
 
         nodes = await proxy.list_nodes()

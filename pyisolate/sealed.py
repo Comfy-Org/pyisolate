@@ -37,7 +37,7 @@ class SealedNodeExtension(ExtensionBase):
     """Minimal node wrapper for sealed workers.
 
     The wrapper supports V1-style ``NODE_CLASS_MAPPINGS`` nodes without importing
-    ComfyUI runtime modules into the child interpreter.
+    host framework runtime modules into the child interpreter.
     """
 
     def __init__(self) -> None:

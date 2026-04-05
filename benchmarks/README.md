@@ -2,6 +2,16 @@
 
 This document describes the benchmarking suite for measuring RPC call overhead in pyisolate.
 
+## Runner Scripts
+
+Platform-specific benchmark runner scripts are included in this directory:
+
+- `run_benchmarks_linux.sh` — Linux/macOS benchmark runner
+- `run_benchmarks_windows.bat` — Windows CMD benchmark runner
+- `run_benchmarks_windows.ps1` — Windows PowerShell benchmark runner
+- `run_benchmarks_powershell_launcher.bat` — PowerShell execution policy wrapper
+- `INSTRUCTIONS.md` — Step-by-step instructions for running benchmarks
+
 ## Overview
 
 The benchmark suite measures the performance overhead of proxied calls compared to local execution, specifically excluding setup costs like virtual environment creation and process startup.

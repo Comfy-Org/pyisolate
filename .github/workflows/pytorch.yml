@@ -46,8 +46,8 @@ jobs:
     - name: Test example with PyTorch
       run: |
         source .venv/bin/activate
-        cd example
-        python main.py -v
+        cd example/torch_share
+        python host.py -v
 
   test-pytorch-cuda:
     name: Test with PyTorch CUDA
@@ -105,5 +105,5 @@ jobs:
     - name: Test example with PyTorch
       run: |
         source .venv/bin/activate
-        cd example
-        python main.py -v
+        cd example/torch_share
+        python host.py -v
