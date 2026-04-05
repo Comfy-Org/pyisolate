@@ -19,7 +19,6 @@ sys.path.insert(0, str(repo_root))
 
 from pyisolate._internal.adapter_registry import AdapterRegistry
 from pyisolate._internal.rpc_protocol import AsyncRPC, ProxiedSingleton
-from pyisolate._internal.sandbox_detect import detect_sandbox_capability
 from pyisolate.config import ExtensionConfig, SandboxMode
 from pyisolate.host import Extension
 from pyisolate.interfaces import SerializerRegistryProtocol
@@ -56,7 +55,7 @@ class MinimalAdapter:
 async def main() -> int:
     pyisolate_root = str(repo_root)
     example_dir = Path(__file__).resolve().parent
-    extension_path = str(example_dir / "extension")
+    extension_module_path = str(example_dir / "extension")
 
     tmp = tempfile.mkdtemp(prefix="torch_share_example_")
     venv_root = os.path.join(tmp, "venvs")
@@ -76,14 +75,13 @@ async def main() -> int:
     AdapterRegistry.unregister()
     AdapterRegistry.register(MinimalAdapter())
 
+    ext = None
     try:
-        # Use the test harness extension which has ping/compute methods
-        # already defined on the type so the host-side proxy can see them.
-        from tests.harness.test_package import ReferenceTestExtension
+        from example.torch_share.extension import TorchShareExtension
 
         config = ExtensionConfig(
             name="torch_share_example",
-            module_path=str(Path(repo_root) / "tests" / "harness" / "test_package"),
+            module_path=extension_module_path,
             isolated=True,
             dependencies=[f"-e {pyisolate_root}"],
             apis=[],
@@ -96,8 +94,8 @@ async def main() -> int:
 
         logger.info("Loading torch_share extension...")
         ext = Extension(
-            module_path=str(Path(repo_root) / "tests" / "harness" / "test_package"),
-            extension_type=ReferenceTestExtension,
+            module_path=extension_module_path,
+            extension_type=TorchShareExtension,
             config=config,
             venv_root_path=venv_root,
         )
@@ -107,15 +105,16 @@ async def main() -> int:
         result = await proxy.ping()
         logger.info(f"ping result: {result}")
 
-        if result == "pong":
+        if result == "pong_torch_share":
             logger.info("PASS — torch_share example completed successfully")
             return 0
         else:
             logger.error(f"FAIL — unexpected ping result: {result}")
             return 1
     finally:
-        with contextlib.suppress(Exception):
-            ext.stop()
+        if ext is not None:
+            with contextlib.suppress(Exception):
+                ext.stop()
         AdapterRegistry.unregister()
 
 

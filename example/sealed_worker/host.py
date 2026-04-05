@@ -22,7 +22,7 @@ from pyisolate._internal.rpc_protocol import AsyncRPC, ProxiedSingleton
 from pyisolate.config import ExtensionConfig, SandboxMode
 from pyisolate.host import Extension
 from pyisolate.interfaces import SerializerRegistryProtocol
-from tests.harness.test_package import ReferenceTestExtension
+from example.sealed_worker.extension import SealedWorkerExtension
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -51,7 +51,7 @@ class MinimalAdapter:
 
 async def main() -> int:
     pyisolate_root = str(repo_root)
-    extension_path = str(Path(__file__).resolve().parent / "extension")
+    extension_module_path = str(Path(__file__).resolve().parent / "extension")
 
     tmp = tempfile.mkdtemp(prefix="sealed_worker_example_")
     venv_root = os.path.join(tmp, "venvs")
@@ -67,10 +67,9 @@ async def main() -> int:
 
     ext = None
     try:
-        test_pkg_path = str(Path(repo_root) / "tests" / "harness" / "test_package")
         config = ExtensionConfig(
             name="sealed_worker_example",
-            module_path=test_pkg_path,
+            module_path=extension_module_path,
             isolated=True,
             dependencies=[f"-e {pyisolate_root}"],
             apis=[],
@@ -83,8 +82,8 @@ async def main() -> int:
 
         logger.info("Loading sealed_worker extension...")
         ext = Extension(
-            module_path=test_pkg_path,
-            extension_type=ReferenceTestExtension,
+            module_path=extension_module_path,
+            extension_type=SealedWorkerExtension,
             config=config,
             venv_root_path=venv_root,
         )
@@ -94,7 +93,7 @@ async def main() -> int:
         result = await proxy.ping()
         logger.info(f"ping result: {result}")
 
-        if result == "pong":
+        if result == "pong_sealed":
             logger.info("PASS — sealed_worker example completed successfully")
             return 0
         else:

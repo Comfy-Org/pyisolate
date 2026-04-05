@@ -23,7 +23,7 @@ from pyisolate._internal.sandbox_detect import detect_sandbox_capability
 from pyisolate.config import ExtensionConfig, SandboxMode
 from pyisolate.host import Extension
 from pyisolate.interfaces import SerializerRegistryProtocol
-from tests.harness.test_package import ReferenceTestExtension
+from example.torch_share.extension import TorchShareExtension
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -65,7 +65,7 @@ async def main() -> int:
         return 1
 
     pyisolate_root = str(repo_root)
-    test_pkg_path = str(Path(repo_root) / "tests" / "harness" / "test_package")
+    extension_module_path = str(Path(repo_root) / "example" / "torch_share" / "extension")
 
     tmp = tempfile.mkdtemp(prefix="bwrap_torch_share_")
     venv_root = os.path.join(tmp, "venvs")
@@ -86,7 +86,7 @@ async def main() -> int:
     try:
         config = ExtensionConfig(
             name="bwrap_torch_share_example",
-            module_path=test_pkg_path,
+            module_path=extension_module_path,
             isolated=True,
             dependencies=[f"-e {pyisolate_root}"],
             apis=[],
@@ -99,8 +99,8 @@ async def main() -> int:
 
         logger.info("Loading bwrap + torch_share extension...")
         ext = Extension(
-            module_path=test_pkg_path,
-            extension_type=ReferenceTestExtension,
+            module_path=extension_module_path,
+            extension_type=TorchShareExtension,
             config=config,
             venv_root_path=venv_root,
         )
@@ -110,7 +110,7 @@ async def main() -> int:
         result = await proxy.ping()
         logger.info(f"ping result: {result}")
 
-        if result == "pong":
+        if result == "pong_torch_share":
             logger.info("PASS — bwrap + torch_share example completed successfully")
             return 0
         else:
