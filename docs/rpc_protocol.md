@@ -218,15 +218,15 @@ PyTorch tensors are not serialized directly. Instead, they are converted to `Ten
 
 ## Transport Layer
 
-The protocol supports multiple transport implementations:
+The primary transport is `JSONSocketTransport` — length-prefixed JSON over Unix Domain Sockets (or TCP on Windows). All isolation modes use this transport.
 
-### QueueTransport
+### JSONSocketTransport (Primary)
 
-Uses `multiprocessing.Queue` for communication. Used when subprocess isolation is via `multiprocessing.Process`.
+Uses length-prefixed JSON-RPC over raw sockets. No pickle. This is the standard transport for all Linux isolation modes (sandboxed and non-sandboxed) and Windows TCP mode.
 
-### UDSTransport
+### QueueTransport (Legacy)
 
-Uses Unix Domain Sockets for communication. Used when subprocess isolation is via `bubblewrap` sandbox.
+Uses `multiprocessing.Queue` for communication. This is a legacy backward-compatibility path and is not used in current isolation modes.
 
 ### Transport Interface
 

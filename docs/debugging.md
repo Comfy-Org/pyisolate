@@ -42,7 +42,7 @@ if os.environ.get("PYISOLATE_CHILD") == "1":
 
 **Cause**: Tensor was garbage collected before remote process could access shared memory.
 
-**Solution**: The `TensorKeeper` class holds references for 30 seconds by default. If you see this error:
+**Solution**: The `TensorKeeper` class holds references for 5.0 seconds by default. If you see this error:
 1. Increase `TensorKeeper.retention_seconds` for slow networks
 2. Ensure tensors aren't being explicitly deleted too early
 3. Check that `/dev/shm` has sufficient space
