@@ -1,7 +1,0 @@
-enabled: true
-isolated: true
-share_torch: false
-dependencies:
-  - scipy>=1.7.0
-  - beautifulsoup4>=4.9.0
-  - numpy>=1.21.0
