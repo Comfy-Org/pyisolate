@@ -180,6 +180,20 @@ class TestGeneratePixiToml:
         assert "pyisolate = { path =" in toml_str
         assert 'pyisolate = "==' not in toml_str
 
+    def test_generate_pixi_toml_pypi_fallback_produces_parseable_toml(self, tmp_path: Path) -> None:
+        import tomllib
+
+        config = _make_conda_config(dependencies=["jax[cuda12]>=0.4.30", "numpy>=2.2"])
+        with patch(
+            "pyisolate._internal.environment_conda._pyisolate_source_path",
+            return_value=tmp_path,
+        ):
+            toml_str = _generate_pixi_toml(config)
+        parsed = tomllib.loads(toml_str)
+        pyisolate_dep = parsed["pypi-dependencies"]["pyisolate"]
+        assert isinstance(pyisolate_dep, str), f"Expected string, got {type(pyisolate_dep)}: {pyisolate_dep}"
+        assert pyisolate_dep.startswith("=="), f"Expected version pin starting with '==', got: {pyisolate_dep}"
+
 
 # ── _parse_dep ──────────────────────────────────────────────────────
 
