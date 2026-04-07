@@ -159,6 +159,27 @@ class TestGeneratePixiToml:
         toml_str = _generate_pixi_toml(config)
         assert 'version = ">=0.4.30"' in toml_str
 
+    def test_generate_pixi_toml_uses_version_pin_when_no_pyproject(self, tmp_path: Path) -> None:
+        config = _make_conda_config()
+        with patch(
+            "pyisolate._internal.environment_conda._pyisolate_source_path",
+            return_value=tmp_path,
+        ):
+            toml_str = _generate_pixi_toml(config)
+        assert 'pyisolate = "==' in toml_str
+        assert "pyisolate = { path =" not in toml_str
+
+    def test_generate_pixi_toml_uses_path_when_pyproject_exists(self, tmp_path: Path) -> None:
+        (tmp_path / "pyproject.toml").write_text("[project]\nname = 'pyisolate'\n")
+        config = _make_conda_config()
+        with patch(
+            "pyisolate._internal.environment_conda._pyisolate_source_path",
+            return_value=tmp_path,
+        ):
+            toml_str = _generate_pixi_toml(config)
+        assert "pyisolate = { path =" in toml_str
+        assert 'pyisolate = "==' not in toml_str
+
 
 # ── _parse_dep ──────────────────────────────────────────────────────
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import importlib.metadata
 import json
 import logging
 import os
@@ -154,7 +155,15 @@ def _generate_pixi_toml(config: ExtensionConfig) -> str:
             lines.append("")
 
         lines.append("[pypi-dependencies]")
-        lines.append(f'pyisolate = {{ path = "{_toml_path_string(_pyisolate_source_path())}" }}')
+        source_path = _pyisolate_source_path()
+        if (source_path / "pyproject.toml").exists():
+            lines.append(f'pyisolate = {{ path = "{_toml_path_string(source_path)}" }}')
+        else:
+            try:
+                version = importlib.metadata.version("pyisolate")
+            except importlib.metadata.PackageNotFoundError:
+                version = "0.0.0"
+            lines.append(f'pyisolate = "=={version}"')
         for dep in pip_deps:
             name_part, sep, version_part, extras, marker = _parse_dep(dep)
             if cuda_wheel_packages and canonicalize_name(name_part) in cuda_wheel_packages:
