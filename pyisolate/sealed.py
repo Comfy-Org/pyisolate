@@ -47,6 +47,48 @@ class SealedNodeExtension(ExtensionBase):
         self.node_instances: dict[str, Any] = {}
         self.remote_objects: dict[str, Any] = {}
         self._module: ModuleType | None = None
+        self._register_ndarray_serializer()
+
+    @staticmethod
+    def _register_ndarray_serializer() -> None:
+        """Register ndarray→TensorValue serializer so _wrap_for_transport passes arrays inline."""
+        try:
+            import numpy as np
+        except ImportError:
+            return
+
+        from ._internal.serialization_registry import SerializerRegistry
+
+        registry = SerializerRegistry.get_instance()
+        if registry.has_handler("ndarray"):
+            return
+
+        _NUMPY_TO_TORCH_DTYPE = {
+            np.float32: "torch.float32",
+            np.float64: "torch.float64",
+            np.float16: "torch.float16",
+            np.int32: "torch.int32",
+            np.int64: "torch.int64",
+            np.int16: "torch.int16",
+            np.int8: "torch.int8",
+            np.uint8: "torch.uint8",
+            np.bool_: "torch.bool",
+        }
+
+        def serialize_ndarray_as_tensor_value(obj: Any) -> dict[str, Any]:
+            arr = np.asarray(obj)
+            dtype_str = _NUMPY_TO_TORCH_DTYPE.get(arr.dtype.type, "torch.float32")
+            if arr.dtype.type not in _NUMPY_TO_TORCH_DTYPE:
+                arr = arr.astype(np.float32)
+            return {
+                "__type__": "TensorValue",
+                "dtype": dtype_str,
+                "tensor_size": list(arr.shape),
+                "requires_grad": False,
+                "data": arr.tolist(),
+            }
+
+        registry.register("ndarray", serialize_ndarray_as_tensor_value, None, data_type=True)
 
     async def on_module_loaded(self, module: ModuleType) -> None:
         self._module = module

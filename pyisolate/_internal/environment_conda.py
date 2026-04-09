@@ -275,12 +275,8 @@ def create_conda_env(env_path: Path, config: ExtensionConfig, name: str) -> None
     """
     env_path.mkdir(parents=True, exist_ok=True)
 
-    pixi_path = shutil.which("pixi")
-    if not pixi_path:
-        raise RuntimeError(
-            "pixi is required for conda backend but not found on PATH. "
-            "Install: curl -fsSL https://pixi.sh/install.sh | bash"
-        )
+    from pyisolate._internal.pixi_provisioner import ensure_pixi
+    pixi_path = ensure_pixi()
 
     cuda_wheels_config = config.get("cuda_wheels")
 
