@@ -347,23 +347,7 @@ def _tensor_to_cuda(obj: Any, device: Any | None = None) -> Any:
             if has:
                 deserializer = registry.get_deserializer(ref_type)
                 if deserializer:
-                    result = deserializer(obj)
-                    logger.warning(
-                        "][ DIAG: __type__=%s -> %s",
-                        ref_type,
-                        type(result).__name__,
-                    )
-                    return result
-                else:
-                    logger.warning(
-                        "][ DIAG: __type__=%s no deserializer",
-                        ref_type,
-                    )
-            else:
-                logger.warning(
-                    "][ DIAG: __type__=%s no handler",
-                    ref_type,
-                )
+                    return deserializer(obj)
 
         # Handle pyisolate internal container types
         if obj.get("__pyisolate_attribute_container__") and "data" in obj:
