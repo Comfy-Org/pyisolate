@@ -13,6 +13,8 @@ import pytest
 
 from pyisolate._internal.pixi_provisioner import (
     PIXI_VERSION,
+    _PLATFORM_MAP,
+    _RELEASE_URL,
     _cache_dir,
     _get_target,
     _verify_checksum,
@@ -36,6 +38,58 @@ class TestGetTarget:
              patch("platform.machine", return_value="sparc"), \
              pytest.raises(RuntimeError, match="Unsupported platform"):
             _get_target()
+
+
+class TestPlatformCoverage:
+    """All 5 supported platform/arch combinations."""
+
+    @pytest.mark.parametrize("system,machine,expected_target", [
+        ("Linux", "x86_64", "x86_64-unknown-linux-musl"),
+        ("Linux", "aarch64", "aarch64-unknown-linux-musl"),
+        ("Darwin", "x86_64", "x86_64-apple-darwin"),
+        ("Darwin", "arm64", "aarch64-apple-darwin"),
+        ("Windows", "AMD64", "x86_64-pc-windows-msvc"),
+    ])
+    def test_platform_target_string(self, system, machine, expected_target):
+        with patch("platform.system", return_value=system), \
+             patch("platform.machine", return_value=machine):
+            result = _get_target()
+            assert result == expected_target
+            print(f"PLATFORM={system}/{machine} TARGET={result}")
+
+    def test_windows_binary_name(self, tmp_path):
+        """ensure_pixi() uses pixi.exe on Windows."""
+        version = PIXI_VERSION
+        cache = tmp_path / "pyisolate" / "pixi" / version
+        cache.mkdir(parents=True)
+        cached_bin = cache / "pixi.exe"
+        cached_bin.write_bytes(b"fake windows binary")
+
+        with patch("shutil.which", return_value=None), \
+             patch("platform.system", return_value="Windows"), \
+             patch("platform.machine", return_value="AMD64"), \
+             patch("pyisolate._internal.pixi_provisioner._cache_dir", return_value=cache):
+            result = ensure_pixi(version)
+            assert result == str(cached_bin)
+            assert result.endswith("pixi.exe")
+            print(f"WINDOWS_BINARY_PATH={result}")
+
+    @pytest.mark.parametrize("system,machine,expected_target", [
+        ("Linux", "x86_64", "x86_64-unknown-linux-musl"),
+        ("Linux", "aarch64", "aarch64-unknown-linux-musl"),
+        ("Darwin", "x86_64", "x86_64-apple-darwin"),
+        ("Darwin", "arm64", "aarch64-apple-darwin"),
+        ("Windows", "AMD64", "x86_64-pc-windows-msvc"),
+    ])
+    def test_url_construction(self, system, machine, expected_target):
+        """Download URL matches GitHub release asset naming convention."""
+        with patch("platform.system", return_value=system), \
+             patch("platform.machine", return_value=machine):
+            target = _get_target()
+            url = _RELEASE_URL.format(version=PIXI_VERSION, target=target)
+            expected_url = f"https://github.com/prefix-dev/pixi/releases/download/v{PIXI_VERSION}/pixi-{expected_target}.tar.gz"
+            assert url == expected_url
+            print(f"URL={url}")
 
 
 class TestVerifyChecksum:
