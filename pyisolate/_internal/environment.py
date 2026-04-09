@@ -90,12 +90,14 @@ def validate_backend_config(config: ExtensionConfig) -> None:
             "Specify at least one channel (e.g. ['conda-forge'])."
         )
 
-    # conda requires pixi on PATH
-    if not shutil.which("pixi"):
+    # conda requires pixi — auto-provision if not on PATH
+    from pyisolate._internal.pixi_provisioner import ensure_pixi
+    try:
+        ensure_pixi()
+    except Exception as e:
         raise ValueError(
-            "pixi is required for conda backend but not found. "
-            "Install: curl -fsSL https://pixi.sh/install.sh | bash"
-        )
+            f"pixi is required for conda backend but could not be provisioned: {e}"
+        ) from e
 
 
 logger = logging.getLogger(__name__)
