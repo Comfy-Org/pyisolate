@@ -565,3 +565,59 @@ def test_resolve_sageattention_host_tags_selects_cp313():
     assert host_cp not in url_target or host_cp == "cp311", (
         f"Unexpected {host_cp} in target URL: {url_target}"
     )
+
+
+def test_extra_index_urls_plumbed_to_install_command(tmp_path, monkeypatch):
+    """extra_index_urls in ExtensionConfig become --extra-index-url args in uv pip install."""
+    from pathlib import Path
+    from pyisolate._internal.environment import install_dependencies, create_venv
+
+    venv_path = tmp_path / "venvs" / "test-ext"
+
+    config = {
+        "name": "test-ext",
+        "module_path": str(tmp_path),
+        "isolated": True,
+        "dependencies": ["numpy>=1.0"],
+        "share_torch": False,
+        "share_cuda_ipc": False,
+        "sandbox_mode": "disabled",
+        "sandbox": {},
+        "extra_index_urls": ["https://example.invalid/simple"],
+    }
+
+    captured_cmd: list[str] = []
+
+    class FakeProc:
+        def __init__(self, cmd, **kwargs):
+            captured_cmd.extend(cmd)
+            self.stdout = iter([])
+            self.returncode = 0
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+        def wait(self):
+            return 0
+
+    monkeypatch.setattr("subprocess.Popen", FakeProc)
+    monkeypatch.setattr("subprocess.check_call", lambda cmd, **kw: None)
+    monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/uv")
+
+    create_venv(venv_path, config)
+
+    # Write a fake python exe so install_dependencies finds it
+    bin_dir = venv_path / "bin"
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    fake_python = bin_dir / "python"
+    fake_python.write_text("#!/bin/sh\n")
+    fake_python.chmod(0o755)
+
+    install_dependencies(venv_path, config, "test-ext")
+
+    assert "--extra-index-url" in captured_cmd
+    idx = captured_cmd.index("--extra-index-url")
+    assert captured_cmd[idx + 1] == "https://example.invalid/simple"
