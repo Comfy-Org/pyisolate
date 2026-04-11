@@ -579,7 +579,7 @@ def test_extra_index_urls_plumbed_to_install_command(tmp_path, monkeypatch):
         "module_path": str(tmp_path),
         "isolated": True,
         "dependencies": ["numpy>=1.0"],
-        "share_torch": False,
+        "share_torch": True,
         "share_cuda_ipc": False,
         "sandbox_mode": "disabled",
         "sandbox": {},
@@ -606,10 +606,12 @@ def test_extra_index_urls_plumbed_to_install_command(tmp_path, monkeypatch):
     monkeypatch.setattr("subprocess.Popen", FakeProc)
     monkeypatch.setattr("subprocess.check_call", lambda cmd, **kw: None)
     monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/uv")
+    monkeypatch.setattr(
+        "pyisolate._internal.environment.exclude_satisfied_requirements",
+        lambda config, reqs, python_exe: reqs,
+    )
 
-    create_venv(venv_path, config)
-
-    # Write a fake python exe so install_dependencies finds it
+    # Set up fake venv structure (skip create_venv — we only test install_dependencies)
     bin_dir = venv_path / "bin"
     bin_dir.mkdir(parents=True, exist_ok=True)
     fake_python = bin_dir / "python"
