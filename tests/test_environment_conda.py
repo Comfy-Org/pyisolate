@@ -186,7 +186,10 @@ class TestGeneratePixiToml:
         assert 'pyisolate = "==' not in toml_str
 
     def test_generate_pixi_toml_pypi_fallback_produces_parseable_toml(self, tmp_path: Path) -> None:
-        import tomllib  # type: ignore[import-not-found]
+        try:
+            import tomllib  # type: ignore[import-not-found]
+        except ModuleNotFoundError:
+            import tomli as tomllib  # type: ignore[import-not-found]
 
         config = _make_conda_config(dependencies=["jax[cuda12]>=0.4.30", "numpy>=2.2"])
         with patch(
