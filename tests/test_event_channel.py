@@ -7,9 +7,8 @@ Tests verify:
 4. API surface exists on ExtensionBase and SealedNodeExtension
 """
 
-from typing import Any, cast
-
 import asyncio
+from typing import Any, cast
 
 import pytest
 

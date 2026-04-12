@@ -1,4 +1,5 @@
 from typing import Any
+
 from pyisolate._internal import host
 
 

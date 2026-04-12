@@ -1,6 +1,6 @@
-from __future__ import annotations
-
 """Tests for execution_model validation and backward-compatible defaults."""
+
+from __future__ import annotations
 
 from typing import Any
 from unittest.mock import patch

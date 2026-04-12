@@ -51,20 +51,20 @@ def _build_uv_config(fixture_path: Path, run_dir: Path) -> ExtensionConfig:
     return cast(
         ExtensionConfig,
         {
-        "name": "uv-sealed-worker",
-        "module_path": str(fixture_path),
-        "isolated": True,
-        "dependencies": ["boltons"],
-        "apis": [],
-        "env": {
-            "PYISOLATE_ARTIFACT_DIR": str(run_dir / "artifacts"),
-            "PYISOLATE_SIGNAL_CLEANUP": "1",
-        },
-        "share_torch": False,
-        "share_cuda_ipc": False,
-        "sandbox": {"writable_paths": [str(run_dir / "artifacts")]},
-        "package_manager": "uv",
-        "execution_model": "sealed_worker",
+            "name": "uv-sealed-worker",
+            "module_path": str(fixture_path),
+            "isolated": True,
+            "dependencies": ["boltons"],
+            "apis": [],
+            "env": {
+                "PYISOLATE_ARTIFACT_DIR": str(run_dir / "artifacts"),
+                "PYISOLATE_SIGNAL_CLEANUP": "1",
+            },
+            "share_torch": False,
+            "share_cuda_ipc": False,
+            "sandbox": {"writable_paths": [str(run_dir / "artifacts")]},
+            "package_manager": "uv",
+            "execution_model": "sealed_worker",
         },
     )
 

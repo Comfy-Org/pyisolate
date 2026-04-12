@@ -1,6 +1,6 @@
-from typing import Any
 import json
 import sys
+from typing import Any
 
 import pytest
 

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from typing import Any
-
 from unittest.mock import patch
 
 import pytest
@@ -94,7 +93,9 @@ class TestCondaMissingPixiRaises:
             package_manager="conda",
             conda_channels=["conda-forge"],
         )
-        with pytest.raises(ValueError, match="pixi is required for conda backend but could not be provisioned"):
+        with pytest.raises(
+            ValueError, match="pixi is required for conda backend but could not be provisioned"
+        ):
             validate_backend_config(config)
 
 

@@ -1,7 +1,7 @@
-from typing import Any, cast
 import asyncio
 import queue
 from types import SimpleNamespace
+from typing import Any, cast
 from unittest.mock import MagicMock
 
 import pytest

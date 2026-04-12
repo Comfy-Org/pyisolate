@@ -41,22 +41,22 @@ def _build_conda_config(fixture_path: Path, run_dir: Path) -> ExtensionConfig:
     return cast(
         ExtensionConfig,
         {
-        "name": "conda-sealed-node",
-        "module_path": str(fixture_path),
-        "isolated": True,
-        "dependencies": ["packaging"],
-        "apis": [],
-        "env": {
-            "PYISOLATE_ARTIFACT_DIR": str(run_dir / "artifacts"),
-            "PYISOLATE_SIGNAL_CLEANUP": "1",
-        },
-        "share_torch": False,
-        "share_cuda_ipc": False,
-        "sandbox": {"writable_paths": [str(run_dir / "artifacts")]},
-        "package_manager": "conda",
-        "execution_model": "sealed_worker",
-        "conda_channels": ["conda-forge"],
-        "conda_dependencies": ["boltons", "numpy"],
+            "name": "conda-sealed-node",
+            "module_path": str(fixture_path),
+            "isolated": True,
+            "dependencies": ["packaging"],
+            "apis": [],
+            "env": {
+                "PYISOLATE_ARTIFACT_DIR": str(run_dir / "artifacts"),
+                "PYISOLATE_SIGNAL_CLEANUP": "1",
+            },
+            "share_torch": False,
+            "share_cuda_ipc": False,
+            "sandbox": {"writable_paths": [str(run_dir / "artifacts")]},
+            "package_manager": "conda",
+            "execution_model": "sealed_worker",
+            "conda_channels": ["conda-forge"],
+            "conda_dependencies": ["boltons", "numpy"],
         },
     )
 

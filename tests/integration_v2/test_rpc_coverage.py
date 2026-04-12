@@ -7,11 +7,10 @@ ReferenceHost and making cross-process RPC calls.
 Subordinate to issue #102 Slice 5 via issue #104.
 """
 
-from collections.abc import Generator
-from typing import Any, cast
-
 import asyncio
 import sys
+from collections.abc import Generator
+from typing import Any, cast
 
 import pytest
 

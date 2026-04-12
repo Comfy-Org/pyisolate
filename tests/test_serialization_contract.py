@@ -10,9 +10,8 @@ Note: These are unit tests that verify serialization at the boundary.
 They use the MockHostAdapter's serializers as the reference implementation.
 """
 
-from typing import Any
-
 import json
+from typing import Any
 
 from pyisolate._internal.serialization_registry import SerializerRegistry
 

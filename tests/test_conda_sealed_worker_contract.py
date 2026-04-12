@@ -1,6 +1,6 @@
-from __future__ import annotations
-
 """Generic conda/uv sealed-worker contract tests."""
+
+from __future__ import annotations
 
 import importlib
 import json

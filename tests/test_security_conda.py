@@ -1,6 +1,6 @@
-from __future__ import annotations
-
 """Tests for conda sealed_worker sandbox launch under bwrap (Issue 8 Slice 4)."""
+
+from __future__ import annotations
 
 import contextlib
 import os
@@ -9,8 +9,8 @@ from pathlib import Path
 from typing import Any, cast
 from unittest.mock import MagicMock, patch
 
-from pyisolate.config import ExtensionConfig
 from pyisolate._internal.sandbox_detect import RestrictionModel
+from pyisolate.config import ExtensionConfig
 
 
 def _make_extension() -> Any:
@@ -20,15 +20,15 @@ def _make_extension() -> Any:
     config = cast(
         ExtensionConfig,
         {
-        "name": "test_conda",
-        "module": "test_module",
-        "dependencies": [],
-        "share_torch": False,
-        "share_cuda_ipc": False,
-        "package_manager": "conda",
-        "execution_model": "sealed_worker",
-        "conda_channels": ["conda-forge"],
-        "conda_dependencies": ["numpy"],
+            "name": "test_conda",
+            "module": "test_module",
+            "dependencies": [],
+            "share_torch": False,
+            "share_cuda_ipc": False,
+            "package_manager": "conda",
+            "execution_model": "sealed_worker",
+            "conda_channels": ["conda-forge"],
+            "conda_dependencies": ["numpy"],
         },
     )
 

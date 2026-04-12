@@ -4,12 +4,11 @@ Pytest configuration and fixtures.
 Add any shared fixtures or pytest configuration here.
 """
 
-from collections.abc import Generator
-from typing import Any
-
 import logging
 import sys
+from collections.abc import Generator
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -41,7 +40,7 @@ def patch_extension_launch(monkeypatch: Any) -> Any:
     """
     from pyisolate._internal import host as host_internal
 
-    original_launch = getattr(host_internal.Extension, "_Extension__launch")
+    original_launch = host_internal.Extension._Extension__launch  # type: ignore[attr-defined]
     host_internal.Extension._orig_launch = original_launch  # type: ignore[attr-defined]
 
     def dummy_launch(self: Any) -> Any:

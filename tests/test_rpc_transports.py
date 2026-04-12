@@ -5,15 +5,13 @@ headers without allocating multi-GB buffers. Real socketpair() used for
 roundtrip and connection-error tests.
 """
 
-from collections.abc import Callable, Coroutine
-from typing import Any, cast
-
 import asyncio
 import contextlib
 import logging
 import socket
 import struct
-from collections.abc import Iterator
+from collections.abc import Callable, Coroutine, Iterator
+from typing import Any, cast
 from unittest.mock import patch
 
 import pytest

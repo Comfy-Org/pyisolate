@@ -2,17 +2,15 @@
 
 from __future__ import annotations
 
-from typing import Any, cast
-
 import json
 import os
 import sys
 from pathlib import Path
+from typing import Any, cast
 from unittest.mock import patch
 
 import pytest
 
-from pyisolate.config import ExtensionConfig
 from pyisolate._internal.environment_conda import (
     _generate_pixi_toml,
     _install_cuda_wheels_into_pixi,
@@ -24,6 +22,7 @@ from pyisolate._internal.environment_conda import (
     _toml_path_string,
     create_conda_env,
 )
+from pyisolate.config import ExtensionConfig
 
 
 def _make_conda_config(**overrides: object) -> ExtensionConfig:

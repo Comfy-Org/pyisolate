@@ -1,5 +1,5 @@
-from typing import Any
 from types import SimpleNamespace
+from typing import Any
 
 from pyisolate._internal import torch_utils
 

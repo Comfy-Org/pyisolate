@@ -1,4 +1,3 @@
-from typing import Any, cast
 import asyncio
 import logging
 import queue
@@ -6,6 +5,7 @@ import socket
 import sys
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any, cast
 
 import pytest
 

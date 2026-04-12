@@ -1,6 +1,6 @@
-from __future__ import annotations
-
 """Tests for sandboxed sealed_worker runtime security behavior (Issue 8 Slice 2)."""
+
+from __future__ import annotations
 
 import contextlib
 import re
@@ -8,8 +8,8 @@ from pathlib import Path
 from typing import Any, cast
 from unittest.mock import MagicMock, patch
 
-from pyisolate.config import ExtensionConfig
 from pyisolate._internal.sandbox_detect import RestrictionModel
+from pyisolate.config import ExtensionConfig
 
 
 def _make_extension() -> Any:
@@ -19,13 +19,13 @@ def _make_extension() -> Any:
     config = cast(
         ExtensionConfig,
         {
-        "name": "test_sealed",
-        "module": "test_module",
-        "dependencies": [],
-        "share_torch": False,
-        "share_cuda_ipc": False,
-        "package_manager": "uv",
-        "execution_model": "sealed_worker",
+            "name": "test_sealed",
+            "module": "test_module",
+            "dependencies": [],
+            "share_torch": False,
+            "share_cuda_ipc": False,
+            "package_manager": "uv",
+            "execution_model": "sealed_worker",
         },
     )
 

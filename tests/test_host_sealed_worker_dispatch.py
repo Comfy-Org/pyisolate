@@ -1,14 +1,14 @@
-from __future__ import annotations
-
 """Tests for uv + sealed_worker host dispatch under bwrap (Issue 8 Slice 2)."""
+
+from __future__ import annotations
 
 import os
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
 
-from pyisolate.config import ExtensionConfig
 from pyisolate._internal.sandbox_detect import RestrictionModel
+from pyisolate.config import ExtensionConfig
 
 
 def _make_extension(config: ExtensionConfig) -> Any:

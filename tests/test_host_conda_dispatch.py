@@ -7,8 +7,8 @@ from pathlib import Path
 from typing import Any, cast
 from unittest.mock import MagicMock, patch
 
-from pyisolate.config import ExtensionConfig
 from pyisolate._internal.sandbox_detect import RestrictionModel
+from pyisolate.config import ExtensionConfig
 
 
 def _make_config(**overrides: object) -> ExtensionConfig:
@@ -26,6 +26,7 @@ def _make_config(**overrides: object) -> ExtensionConfig:
 
 def _call_private_launch(ext: Any) -> Any:
     return ext._Extension__launch()
+
 
 # ── __launch dispatch ────────────────────────────────────────────────
 

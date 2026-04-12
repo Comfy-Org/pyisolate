@@ -1,7 +1,7 @@
-from typing import Any, cast
 import importlib
 import sys
 from types import ModuleType
+from typing import Any, cast
 
 import pytest
 

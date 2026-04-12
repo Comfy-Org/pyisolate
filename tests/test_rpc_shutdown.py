@@ -1,8 +1,7 @@
 """Tests for RPC graceful shutdown behavior."""
 
-from typing import Any
-
 import asyncio
+from typing import Any
 from unittest.mock import Mock
 
 import pytest

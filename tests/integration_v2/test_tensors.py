@@ -1,5 +1,5 @@
-from typing import Any
 import gc
+from typing import Any
 
 import pytest
 import torch  # noqa: E402

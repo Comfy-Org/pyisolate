@@ -1,8 +1,8 @@
-from collections.abc import Generator
-from typing import Any
 import json
 import sys
+from collections.abc import Generator
 from importlib import import_module
+from typing import Any
 
 import pytest
 

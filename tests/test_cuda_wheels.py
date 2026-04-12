@@ -4,12 +4,11 @@ These tests intentionally use monkeypatches and fake indexes. They do not
 perform a real wheel download or a real install.
 """
 
-from typing import Any, cast
-
 import builtins
 import io
 import sys
 from types import SimpleNamespace
+from typing import Any, cast
 
 import pytest
 from packaging.tags import sys_tags

@@ -1,4 +1,5 @@
 from typing import Any
+
 import pytest
 
 from pyisolate._internal import bootstrap

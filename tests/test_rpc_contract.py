@@ -11,9 +11,8 @@ without full process isolation. For full integration tests, see
 original_integration/.
 """
 
-from typing import Any, cast
-
 import asyncio
+from typing import Any, cast
 
 import pytest
 

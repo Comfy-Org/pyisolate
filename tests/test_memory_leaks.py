@@ -9,11 +9,10 @@ Note: Uses weakref to verify objects are collected, not actual memory profiling.
 For actual memory profiling, use tracemalloc in integration tests.
 """
 
-from typing import Any
-
 import gc
 import time
 import weakref
+from typing import Any
 
 import pytest
 

@@ -79,15 +79,15 @@ def test_sealed_worker_exact_proxy_binding() -> None:
         cast(
             ExtensionConfig,
             {
-            "name": "test_ext",
-            "module": "test_module",
-            "module_path": "/fake/module",
-            "dependencies": [],
-            "share_torch": False,
-            "share_cuda_ipc": False,
-            "package_manager": "uv",
-            "execution_model": "sealed_worker",
-            "apis": [DummyProxy],
+                "name": "test_ext",
+                "module": "test_module",
+                "module_path": "/fake/module",
+                "dependencies": [],
+                "share_torch": False,
+                "share_cuda_ipc": False,
+                "package_manager": "uv",
+                "execution_model": "sealed_worker",
+                "apis": [DummyProxy],
             },
         )
     )
