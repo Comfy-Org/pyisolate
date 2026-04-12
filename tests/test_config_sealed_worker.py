@@ -1,7 +1,8 @@
-"""Tests for execution_model validation and backward-compatible defaults."""
-
 from __future__ import annotations
 
+"""Tests for execution_model validation and backward-compatible defaults."""
+
+from typing import Any
 from unittest.mock import patch
 
 import pytest
@@ -9,7 +10,7 @@ import pytest
 from pyisolate._internal.environment import validate_backend_config
 
 
-def _make_config(**overrides):
+def _make_config(**overrides: Any) -> Any:
     base = {
         "name": "test_ext",
         "module_path": "/fake/path",
@@ -52,7 +53,9 @@ def test_sealed_worker_rejects_share_torch_true() -> None:
     ],
 )
 @patch("shutil.which", return_value="/usr/bin/pixi")
-def test_rejects_cuda_ipc_without_share_torch(mock_which, package_manager: str, execution_model: str) -> None:
+def test_rejects_cuda_ipc_without_share_torch(
+    mock_which: Any, package_manager: str, execution_model: str
+) -> None:
     config = _make_config(
         package_manager=package_manager,
         execution_model=execution_model,
@@ -66,7 +69,7 @@ def test_rejects_cuda_ipc_without_share_torch(mock_which, package_manager: str, 
 
 
 @patch("shutil.which", return_value="/usr/bin/pixi")
-def test_accepts_valid_mode_matrix(mock_which) -> None:
+def test_accepts_valid_mode_matrix(mock_which: Any) -> None:
     valid_configs = [
         _make_config(execution_model="host-coupled", share_torch=True, share_cuda_ipc=True),
         _make_config(execution_model="host-coupled", share_torch=True, share_cuda_ipc=False),
@@ -113,7 +116,7 @@ def test_sealed_host_ro_paths_defaults_off_and_validation() -> None:
 
 
 @patch("shutil.which", return_value="/usr/bin/pixi")
-def test_conda_defaults_to_sealed_worker(mock_which) -> None:
+def test_conda_defaults_to_sealed_worker(mock_which: Any) -> None:
     config = _make_config(
         package_manager="conda",
         conda_channels=["conda-forge"],
@@ -123,7 +126,7 @@ def test_conda_defaults_to_sealed_worker(mock_which) -> None:
 
 
 @patch("shutil.which", return_value="/usr/bin/pixi")
-def test_conda_rejects_host_coupled_execution_model(mock_which) -> None:
+def test_conda_rejects_host_coupled_execution_model(mock_which: Any) -> None:
     config = _make_config(
         package_manager="conda",
         execution_model="host-coupled",

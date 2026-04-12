@@ -1,3 +1,5 @@
+from collections.abc import Generator
+from typing import Any
 import json
 import sys
 from importlib import import_module
@@ -11,36 +13,36 @@ from pyisolate._internal.serialization_registry import SerializerRegistry
 class FakeAdapter:
     identifier = "fake"
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.setup_called = False
         self.registry_used = False
 
-    def get_path_config(self, module_path):
+    def get_path_config(self, module_path: Any) -> Any:
         return None
 
-    def setup_child_environment(self, snapshot):
+    def setup_child_environment(self, snapshot: Any) -> None:
         self.setup_called = True
 
-    def register_serializers(self, registry):
+    def register_serializers(self, registry: Any) -> None:
         self.registry_used = True
         registry.register("FakeType", lambda x: {"v": x}, lambda x: x["v"])
 
-    def provide_rpc_services(self):
+    def provide_rpc_services(self) -> Any:
         return []
 
-    def handle_api_registration(self, api, rpc):
+    def handle_api_registration(self, api: Any, rpc: Any) -> Any:
         return None
 
 
 @pytest.fixture(autouse=True)
-def clear_registry():
+def clear_registry() -> Generator[None, None, None]:
     registry = SerializerRegistry.get_instance()
     registry.clear()
     yield
     registry.clear()
 
 
-def test_bootstrap_applies_snapshot(monkeypatch, tmp_path):
+def test_bootstrap_applies_snapshot(monkeypatch: Any, tmp_path: Any) -> None:
     fake_adapter = FakeAdapter()
     monkeypatch.setattr(bootstrap, "_rehydrate_adapter", lambda name: fake_adapter)
 
@@ -66,18 +68,18 @@ def test_bootstrap_applies_snapshot(monkeypatch, tmp_path):
     assert registry.has_handler("FakeType")
 
 
-def test_bootstrap_no_snapshot(monkeypatch):
+def test_bootstrap_no_snapshot(monkeypatch: Any) -> None:
     monkeypatch.delenv("PYISOLATE_HOST_SNAPSHOT", raising=False)
     assert bootstrap.bootstrap_child() is None
 
 
-def test_bootstrap_bad_json(monkeypatch):
+def test_bootstrap_bad_json(monkeypatch: Any) -> None:
     monkeypatch.setenv("PYISOLATE_HOST_SNAPSHOT", "not-json")
     with pytest.raises(ValueError):
         bootstrap.bootstrap_child()
 
 
-def test_bootstrap_missing_adapter(monkeypatch):
+def test_bootstrap_missing_adapter(monkeypatch: Any) -> None:
     monkeypatch.setenv("PYISOLATE_HOST_SNAPSHOT", json.dumps({"adapter_ref": "missing"}))
     monkeypatch.setattr(
         bootstrap, "_rehydrate_adapter", lambda name: (_ for _ in ()).throw(ValueError("nope"))
@@ -86,7 +88,7 @@ def test_bootstrap_missing_adapter(monkeypatch):
         bootstrap.bootstrap_child()
 
 
-def test_bootstrap_skips_host_sys_path_for_sealed_worker(monkeypatch, tmp_path):
+def test_bootstrap_skips_host_sys_path_for_sealed_worker(monkeypatch: Any, tmp_path: Any) -> None:
     host_only_path = str(tmp_path / "host_only")
     snapshot = {
         "sys_path": [host_only_path],
@@ -106,7 +108,7 @@ def test_bootstrap_skips_host_sys_path_for_sealed_worker(monkeypatch, tmp_path):
     assert host_only_path not in updated_sys_path
 
 
-def test_bootstrap_sealed_worker_skips_adapter_rehydration(monkeypatch):
+def test_bootstrap_sealed_worker_skips_adapter_rehydration(monkeypatch: Any) -> None:
     snapshot = {
         "adapter_ref": "bad.module:BadClass",
         "apply_host_sys_path": False,
@@ -119,7 +121,9 @@ def test_bootstrap_sealed_worker_skips_adapter_rehydration(monkeypatch):
     assert bootstrap.bootstrap_child() is None
 
 
-def test_sealed_worker_host_policy_ro_paths_enable_import_without_host_sys_path(monkeypatch, tmp_path):
+def test_sealed_worker_host_policy_ro_paths_enable_import_without_host_sys_path(
+    monkeypatch: Any, tmp_path: Any
+) -> None:
     module_name = "sealed_opt_in_visible_module"
     module_root = tmp_path / "opt_in_root"
     module_root.mkdir(parents=True, exist_ok=True)
@@ -143,7 +147,7 @@ def test_sealed_worker_host_policy_ro_paths_enable_import_without_host_sys_path(
     assert imported.VALUE == 42
 
 
-def test_sealed_worker_without_opt_in_still_cannot_import_module(monkeypatch, tmp_path):
+def test_sealed_worker_without_opt_in_still_cannot_import_module(monkeypatch: Any, tmp_path: Any) -> None:
     module_name = "sealed_no_opt_in_hidden_module"
     blocked_root = tmp_path / "blocked_root"
     blocked_root.mkdir(parents=True, exist_ok=True)
@@ -165,7 +169,7 @@ def test_sealed_worker_without_opt_in_still_cannot_import_module(monkeypatch, tm
         sys.modules.pop(module_name, None)
 
 
-def test_sealed_worker_attempts_adapter_rehydration_non_fatal(monkeypatch, tmp_path):
+def test_sealed_worker_attempts_adapter_rehydration_non_fatal(monkeypatch: Any, tmp_path: Any) -> None:
     """Sealed workers attempt adapter rehydration for serializer registration.
 
     If rehydration fails, it is not fatal — the sealed worker continues
@@ -179,7 +183,7 @@ def test_sealed_worker_attempts_adapter_rehydration_non_fatal(monkeypatch, tmp_p
 
     called = {"rehydrate": False}
 
-    def _fail(_name: str):
+    def _fail(_name: str) -> None:
         called["rehydrate"] = True
         raise ImportError("adapter module not available in sealed env")
 
@@ -205,11 +209,11 @@ def test_sealed_worker_attempts_adapter_rehydration_non_fatal(monkeypatch, tmp_p
     assert imported.VALUE == 99
 
 
-def test_sealed_worker_singleton_bootstrap_attempts_adapter_rehydration(monkeypatch):
+def test_sealed_worker_singleton_bootstrap_attempts_adapter_rehydration(monkeypatch: Any) -> None:
     """Sealed workers attempt adapter rehydration. Failure is non-fatal."""
     called = {"rehydrate": False}
 
-    def _fail(_name: str):
+    def _fail(_name: str) -> None:
         called["rehydrate"] = True
         raise ImportError("sealed singleton cannot import adapter module")
 

@@ -1,15 +1,17 @@
-"""Tests for uv + sealed_worker host dispatch under bwrap (Issue 8 Slice 2)."""
-
 from __future__ import annotations
+
+"""Tests for uv + sealed_worker host dispatch under bwrap (Issue 8 Slice 2)."""
 
 import os
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock, patch
 
+from pyisolate.config import ExtensionConfig
 from pyisolate._internal.sandbox_detect import RestrictionModel
 
 
-def _make_extension(config: dict[str, object]):
+def _make_extension(config: ExtensionConfig) -> Any:
     from pyisolate._internal.host import Extension
     from pyisolate.shared import ExtensionBase
 
@@ -41,10 +43,12 @@ class TestLaunchDispatchSealedWorker:
         mock_create_conda: MagicMock,
         mock_validate: MagicMock,
     ) -> None:
-        config = {
+        config: ExtensionConfig = {
             "name": "test_ext",
             "module": "test_module",
+            "isolated": True,
             "dependencies": [],
+            "apis": [],
             "share_torch": False,
             "share_cuda_ipc": False,
             "package_manager": "uv",
@@ -62,10 +66,12 @@ class TestLaunchDispatchSealedWorker:
         mock_create_conda.assert_not_called()
 
     def test_uv_sealed_worker_uses_json_tensor_transport(self) -> None:
-        config = {
+        config: ExtensionConfig = {
             "name": "test_ext",
             "module": "test_module",
+            "isolated": True,
             "dependencies": [],
+            "apis": [],
             "share_torch": False,
             "share_cuda_ipc": False,
             "package_manager": "uv",
@@ -83,10 +89,12 @@ class TestLaunchDispatchSealedWorker:
         mock_popen: MagicMock,
         mock_build_bwrap: MagicMock,
     ) -> None:
-        config = {
+        config: ExtensionConfig = {
             "name": "test_ext",
             "module": "test_module",
+            "isolated": True,
             "dependencies": [],
+            "apis": [],
             "share_torch": False,
             "share_cuda_ipc": False,
             "package_manager": "uv",
@@ -149,10 +157,12 @@ class TestLaunchDispatchSealedWorker:
         assert bootstrap_data["snapshot"]["apply_host_sys_path"] is False
 
     def test_uv_host_coupled_keeps_shared_memory_tensor_transport(self) -> None:
-        config = {
+        config: ExtensionConfig = {
             "name": "test_ext",
             "module": "test_module",
+            "isolated": True,
             "dependencies": [],
+            "apis": [],
             "share_torch": False,
             "share_cuda_ipc": False,
             "package_manager": "uv",

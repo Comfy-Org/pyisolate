@@ -7,6 +7,8 @@ Tests verify:
 4. API surface exists on ExtensionBase and SealedNodeExtension
 """
 
+from typing import Any, cast
+
 import asyncio
 
 import pytest
@@ -17,12 +19,12 @@ from pyisolate._internal.event_bridge import _EventBridge
 class TestEventBridgeDispatch:
     """Tests for _EventBridge RPC callee behavior."""
 
-    def test_emit_event_dispatches_to_handler(self):
+    def test_emit_event_dispatches_to_handler(self) -> None:
         """emit_event("progress", payload) calls the registered handler with exact payload."""
         bridge = _EventBridge()
         received = []
 
-        def handler(payload):
+        def handler(payload: Any) -> None:
             received.append(payload)
 
         bridge.register_handler("progress", handler)
@@ -31,14 +33,14 @@ class TestEventBridgeDispatch:
         assert len(received) == 1
         assert received[0] == {"value": 5, "total": 10}
 
-    def test_emit_unregistered_event_raises(self):
+    def test_emit_unregistered_event_raises(self) -> None:
         """emit_event("unknown_event", {}) raises ValueError, not silently dropped."""
         bridge = _EventBridge()
 
         with pytest.raises(ValueError, match="No handler registered for event 'unknown_event'"):
             asyncio.get_event_loop().run_until_complete(bridge.dispatch("unknown_event", {}))
 
-    def test_emit_event_rejects_non_json_payload(self):
+    def test_emit_event_rejects_non_json_payload(self) -> None:
         """emit_event with non-JSON-serializable payload raises immediately."""
         from pyisolate.shared import ExtensionLocal
 
@@ -50,14 +52,14 @@ class TestEventBridgeDispatch:
             pass
 
         with pytest.raises(TypeError):
-            ext.emit_event("progress", NotSerializable())
+            ext.emit_event("progress", cast(Any, NotSerializable()))
 
-    def test_dispatch_with_async_handler(self):
+    def test_dispatch_with_async_handler(self) -> None:
         """Async handlers are awaited correctly."""
         bridge = _EventBridge()
         received = []
 
-        async def async_handler(payload):
+        async def async_handler(payload: Any) -> None:
             received.append(payload)
 
         bridge.register_handler("test", async_handler)
@@ -65,7 +67,7 @@ class TestEventBridgeDispatch:
 
         assert received == [{"key": "value"}]
 
-    def test_multiple_events_independent(self):
+    def test_multiple_events_independent(self) -> None:
         """Different event names dispatch to different handlers."""
         bridge = _EventBridge()
         progress_calls = []
@@ -84,14 +86,14 @@ class TestEventBridgeDispatch:
 class TestApiSurface:
     """Tests that the event channel API exists on the right classes."""
 
-    def test_extension_base_has_emit_event(self):
+    def test_extension_base_has_emit_event(self) -> None:
         """ExtensionBase has emit_event method."""
         from pyisolate.shared import ExtensionBase
 
         assert hasattr(ExtensionBase, "emit_event")
         assert callable(ExtensionBase.emit_event)
 
-    def test_sealed_node_extension_has_emit_event(self):
+    def test_sealed_node_extension_has_emit_event(self) -> None:
         """SealedNodeExtension inherits emit_event from ExtensionBase."""
         from pyisolate.sealed import SealedNodeExtension
 

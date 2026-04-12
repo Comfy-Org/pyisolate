@@ -11,6 +11,8 @@ without full process isolation. For full integration tests, see
 original_integration/.
 """
 
+from typing import Any, cast
+
 import asyncio
 
 import pytest
@@ -23,14 +25,14 @@ from .fixtures.test_adapter import MockRegistry
 class TestProxiedSingletonContract:
     """Tests for ProxiedSingleton metaclass behavior."""
 
-    def test_singleton_returns_same_instance(self):
+    def test_singleton_returns_same_instance(self) -> None:
         """Multiple instantiations return the same instance."""
         instance1 = MockRegistry()
         instance2 = MockRegistry()
 
         assert instance1 is instance2
 
-    def test_singleton_instance_persists(self):
+    def test_singleton_instance_persists(self) -> None:
         """Singleton instance persists across calls."""
         instance1 = MockRegistry()
         instance1.register("test_object")
@@ -39,11 +41,11 @@ class TestProxiedSingletonContract:
         # Should see the object registered via instance1
         assert instance2.get("obj_0") == "test_object"
 
-    def test_different_singletons_are_independent(self):
+    def test_different_singletons_are_independent(self) -> None:
         """Different ProxiedSingleton subclasses are independent."""
 
         class AnotherRegistry(ProxiedSingleton):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.data = "another"
 
@@ -58,7 +60,7 @@ class TestProxiedSingletonContract:
 class TestRpcMethodContract:
     """Tests for RPC method call contract."""
 
-    def test_method_returns_value(self):
+    def test_method_returns_value(self) -> None:
         """RPC method must return expected value."""
         registry = MockRegistry()
         obj = {"key": "value"}
@@ -68,7 +70,7 @@ class TestRpcMethodContract:
 
         assert result == obj
 
-    def test_method_accepts_arguments(self):
+    def test_method_accepts_arguments(self) -> None:
         """RPC method must accept positional and keyword arguments."""
         registry = MockRegistry()
 
@@ -76,14 +78,14 @@ class TestRpcMethodContract:
         id1 = registry.register("positional_arg")
         assert registry.get(id1) == "positional_arg"
 
-    def test_method_handles_none_return(self):
+    def test_method_handles_none_return(self) -> None:
         """RPC method can return None."""
         registry = MockRegistry()
 
         result = registry.get("nonexistent")
         assert result is None
 
-    def test_method_handles_complex_objects(self):
+    def test_method_handles_complex_objects(self) -> None:
         """RPC method can handle complex nested objects."""
         registry = MockRegistry()
 
@@ -107,7 +109,7 @@ class TestEventLoopResilience:
     recreated (e.g., between workflow executions).
     """
 
-    def test_singleton_survives_loop_recreation(self):
+    def test_singleton_survives_loop_recreation(self) -> None:
         """Singleton instance survives event loop recreation."""
         try:
             previous_loop = asyncio.get_event_loop_policy().get_event_loop()
@@ -135,7 +137,7 @@ class TestEventLoopResilience:
             elif not loop1.is_closed():
                 loop1.close()
 
-    def test_singleton_data_persists_across_loops(self):
+    def test_singleton_data_persists_across_loops(self) -> None:
         """Data stored in singleton persists across event loops."""
         try:
             previous_loop = asyncio.get_event_loop_policy().get_event_loop()
@@ -169,11 +171,11 @@ class TestEventLoopResilience:
 class TestRpcErrorHandling:
     """Tests for RPC error handling contract."""
 
-    def test_method_exception_propagates(self):
+    def test_method_exception_propagates(self) -> None:
         """Exceptions in RPC methods should propagate."""
 
         class FailingService(ProxiedSingleton):
-            def fail(self):
+            def fail(self) -> None:
                 raise ValueError("Intentional failure")
 
         service = FailingService()
@@ -181,7 +183,7 @@ class TestRpcErrorHandling:
         with pytest.raises(ValueError, match="Intentional failure"):
             service.fail()
 
-    def test_type_error_propagates(self):
+    def test_type_error_propagates(self) -> Any:
         """TypeError in RPC methods should propagate."""
 
         class TypedService(ProxiedSingleton):
@@ -192,4 +194,4 @@ class TestRpcErrorHandling:
 
         # Wrong type should raise TypeError
         with pytest.raises(TypeError):
-            service.typed_method("not an int")
+            service.typed_method(cast(Any, "not an int"))

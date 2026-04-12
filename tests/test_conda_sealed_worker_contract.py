@@ -1,12 +1,13 @@
-"""Generic conda/uv sealed-worker contract tests."""
-
 from __future__ import annotations
+
+"""Generic conda/uv sealed-worker contract tests."""
 
 import importlib
 import json
 import os
 import sys
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -15,11 +16,12 @@ from pyisolate._internal import bootstrap
 from pyisolate._internal.environment_conda import _generate_pixi_toml, _resolve_pixi_python
 from pyisolate._internal.host import Extension
 from pyisolate._internal.sandbox_detect import RestrictionModel
+from pyisolate.config import ExtensionConfig
 from pyisolate.shared import ExtensionBase
 
 
-def _make_conda_config(**overrides):
-    config = {
+def _make_conda_config(**overrides: Any) -> ExtensionConfig:
+    config: dict[str, Any] = {
         "name": "contract_ext",
         "module": "contract_module",
         "dependencies": ["requests>=2.0"],
@@ -31,10 +33,10 @@ def _make_conda_config(**overrides):
         "conda_platforms": ["linux-64"],
     }
     config.update(overrides)
-    return config
+    return config  # type: ignore[return-value]
 
 
-def _make_extension(config: dict) -> Extension:
+def _make_extension(config: ExtensionConfig) -> Extension:
     ext = Extension.__new__(Extension)
     ext.name = config["name"]
     ext.config = config
@@ -48,7 +50,7 @@ def _make_extension(config: dict) -> Extension:
     return ext
 
 
-def _capture_bootstrap_payload(config: dict) -> dict:
+def _capture_bootstrap_payload(config: ExtensionConfig) -> dict[str, Any]:
     ext = _make_extension(config)
 
     listener = MagicMock()
@@ -91,10 +93,10 @@ def _capture_bootstrap_payload(config: dict) -> dict:
         mock_socket.SOCK_STREAM = 1
         ext._launch_with_uds()
 
-    return transport.send.call_args[0][0]
+    return transport.send.call_args[0][0]  # type: ignore[no-any-return]
 
 
-def test_conda_dependency_split():
+def test_conda_dependency_split() -> None:
     config = _make_conda_config(
         conda_dependencies=["numpy>=1.26", "scipy"],
         dependencies=["requests>=2.0", "pandas"],
@@ -110,7 +112,7 @@ def test_conda_dependency_split():
     assert 'pandas = "*"' in toml_text
 
 
-def test_conda_channels_platforms_pass_through():
+def test_conda_channels_platforms_pass_through() -> None:
     config = _make_conda_config(
         conda_channels=["conda-forge", "nvidia"],
         conda_platforms=["linux-64", "win-64"],
@@ -122,7 +124,7 @@ def test_conda_channels_platforms_pass_through():
     assert 'platforms = ["linux-64", "win-64"]' in toml_text
 
 
-def test_uv_defaults_unchanged():
+def test_uv_defaults_unchanged() -> None:
     config = _make_conda_config(package_manager="uv")
     ext = _make_extension(config)
 
@@ -130,7 +132,7 @@ def test_uv_defaults_unchanged():
     assert ext._tensor_transport_mode() == "shared_memory"
 
 
-def test_no_host_fallback(tmp_path: Path):
+def test_no_host_fallback(tmp_path: Path) -> None:
     env_path = tmp_path / "conda_env"
     if os.name == "nt":
         python_path = env_path / ".pixi" / "envs" / "default" / "python.exe"
@@ -145,7 +147,7 @@ def test_no_host_fallback(tmp_path: Path):
     assert ".pixi" in str(resolved)
 
 
-def test_no_host_sys_path():
+def test_no_host_sys_path() -> None:
     payload = _capture_bootstrap_payload(
         _make_conda_config(package_manager="conda", execution_model="sealed_worker")
     )
@@ -156,7 +158,7 @@ def test_no_host_sys_path():
     assert snapshot["preferred_root"] is None
 
 
-def test_no_extension_wrapper_import():
+def test_no_extension_wrapper_import() -> None:
     payload = _capture_bootstrap_payload(
         _make_conda_config(package_manager="conda", execution_model="sealed_worker")
     )
@@ -169,7 +171,7 @@ def test_no_extension_wrapper_import():
 
 def test_sealed_worker_host_policy_ro_paths_default_block_and_opt_in_allow(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+) -> None:
     payload_default = _capture_bootstrap_payload(
         _make_conda_config(package_manager="conda", execution_model="sealed_worker")
     )

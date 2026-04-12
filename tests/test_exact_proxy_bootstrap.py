@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any, cast
 from unittest.mock import MagicMock, patch
 
 from pyisolate._internal.host import Extension
+from pyisolate.config import ExtensionConfig
 from pyisolate.shared import ExtensionBase
 
 
@@ -14,7 +16,7 @@ class DummyProxy:
 DummyProxy.__module__ = "tests.test_exact_proxy_bootstrap"
 
 
-def _make_extension(config: dict) -> Extension:
+def _make_extension(config: ExtensionConfig) -> Extension:
     ext = Extension.__new__(Extension)
     ext.name = config["name"]
     ext.normalized_name = config["name"]
@@ -30,7 +32,7 @@ def _make_extension(config: dict) -> Extension:
     return ext
 
 
-def _capture_bootstrap_payload(config: dict) -> dict:
+def _capture_bootstrap_payload(config: ExtensionConfig) -> dict[str, Any]:
     ext = _make_extension(config)
 
     listener = MagicMock()
@@ -69,12 +71,14 @@ def _capture_bootstrap_payload(config: dict) -> dict:
         mock_socket.SOCK_STREAM = 1
         ext._launch_with_uds()
 
-    return transport.send.call_args[0][0]
+    return cast(dict[str, Any], transport.send.call_args[0][0])
 
 
 def test_sealed_worker_exact_proxy_binding() -> None:
     payload = _capture_bootstrap_payload(
-        {
+        cast(
+            ExtensionConfig,
+            {
             "name": "test_ext",
             "module": "test_module",
             "module_path": "/fake/module",
@@ -84,7 +88,8 @@ def test_sealed_worker_exact_proxy_binding() -> None:
             "package_manager": "uv",
             "execution_model": "sealed_worker",
             "apis": [DummyProxy],
-        }
+            },
+        )
     )
 
     assert payload["snapshot"]["apply_host_sys_path"] is False

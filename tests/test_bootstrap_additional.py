@@ -1,3 +1,4 @@
+from typing import Any
 import json
 import sys
 
@@ -6,7 +7,7 @@ import pytest
 from pyisolate._internal import bootstrap
 
 
-def test_apply_sys_path_merges_and_dedup(monkeypatch, tmp_path):
+def test_apply_sys_path_merges_and_dedup(monkeypatch: Any, tmp_path: Any) -> None:
     original = list(sys.path)
     snapshot = {
         "sys_path": [str(tmp_path), str(tmp_path)],
@@ -20,12 +21,12 @@ def test_apply_sys_path_merges_and_dedup(monkeypatch, tmp_path):
     sys.path[:] = original
 
 
-def test_bootstrap_child_missing_snapshot_returns_none(monkeypatch):
+def test_bootstrap_child_missing_snapshot_returns_none(monkeypatch: Any) -> None:
     monkeypatch.delenv("PYISOLATE_HOST_SNAPSHOT", raising=False)
     assert bootstrap.bootstrap_child() is None
 
 
-def test_bootstrap_child_json_payload_adapter_none(monkeypatch):
+def test_bootstrap_child_json_payload_adapter_none(monkeypatch: Any) -> None:
     payload = json.dumps(
         {
             "sys_path": [],
@@ -41,7 +42,7 @@ def test_bootstrap_child_json_payload_adapter_none(monkeypatch):
         bootstrap.bootstrap_child()
 
 
-def test_bootstrap_child_snapshot_file_errors(tmp_path, monkeypatch):
+def test_bootstrap_child_snapshot_file_errors(tmp_path: Any, monkeypatch: Any) -> None:
     snap_path = tmp_path / "bad.json"
     snap_path.write_text("not-json")
     monkeypatch.setenv("PYISOLATE_HOST_SNAPSHOT", str(snap_path))
@@ -49,7 +50,7 @@ def test_bootstrap_child_snapshot_file_errors(tmp_path, monkeypatch):
         bootstrap.bootstrap_child()
 
 
-def test_bootstrap_child_missing_file_graceful(tmp_path, monkeypatch):
+def test_bootstrap_child_missing_file_graceful(tmp_path: Any, monkeypatch: Any) -> None:
     snap_path = tmp_path / "missing.json"
     monkeypatch.setenv("PYISOLATE_HOST_SNAPSHOT", str(snap_path))
     assert bootstrap.bootstrap_child() is None

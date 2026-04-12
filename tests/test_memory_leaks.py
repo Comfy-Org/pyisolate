@@ -9,6 +9,8 @@ Note: Uses weakref to verify objects are collected, not actual memory profiling.
 For actual memory profiling, use tracemalloc in integration tests.
 """
 
+from typing import Any
+
 import gc
 import time
 import weakref
@@ -21,11 +23,11 @@ from pyisolate._internal.rpc_protocol import ProxiedSingleton, SingletonMetaclas
 class TestProxyGarbageCollection:
     """Tests for proxy object garbage collection."""
 
-    def test_proxy_gc_after_singleton_clear(self):
+    def test_proxy_gc_after_singleton_clear(self) -> None:
         """Verify ProxiedSingleton instances can be garbage collected."""
 
         class TestService(ProxiedSingleton):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.data = "test"
 
@@ -47,16 +49,16 @@ class TestProxyGarbageCollection:
         # Instance should be collected
         assert weak_ref() is None, "Singleton not collected after clearing registry"
 
-    def test_nested_singleton_gc(self):
+    def test_nested_singleton_gc(self) -> None:
         """Verify nested singletons are properly collected."""
 
         class ChildService(ProxiedSingleton):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
-                self.data = []
+                self.data: list[Any] = []
 
         class ParentService(ProxiedSingleton):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.child = ChildService()
 
@@ -85,25 +87,23 @@ class TestTensorKeeperCleanup:
     """Tests for TensorKeeper memory management."""
 
     @pytest.fixture
-    def fast_tensor_keeper(self, monkeypatch):
+    def fast_tensor_keeper(self, monkeypatch: Any) -> None:
         """Configure TensorKeeper with short retention for testing."""
         from pyisolate._internal.tensor_serializer import TensorKeeper
+
+        def fast_init(self: Any, retention_seconds: float = 2.0) -> None:  # noqa: ARG001
+            self.retention_seconds = 2.0
+            self._keeper = __import__("collections").deque()
+            self._lock = __import__("threading").Lock()
 
         # Use 2 second retention for fast testing
         monkeypatch.setattr(
             TensorKeeper,
             "__init__",
-            lambda self, retention_seconds=2.0: (
-                (
-                    setattr(self, "retention_seconds", 2.0),
-                    setattr(self, "_keeper", __import__("collections").deque()),
-                    setattr(self, "_lock", __import__("threading").Lock()),
-                )[-1]
-                or None
-            ),
+            fast_init,
         )
 
-    def test_tensor_keeper_keeps_reference(self):
+    def test_tensor_keeper_keeps_reference(self) -> None:
         """Verify TensorKeeper holds tensor reference."""
         pytest.importorskip("torch")
         import torch
@@ -125,7 +125,7 @@ class TestTensorKeeperCleanup:
         assert weak_ref() is not None, "Tensor collected while keeper holds it"
 
     @pytest.mark.slow
-    def test_tensor_keeper_releases_after_timeout(self):
+    def test_tensor_keeper_releases_after_timeout(self) -> None:
         """Verify TensorKeeper releases tensors after retention period.
 
         Note: This test takes ~3 seconds due to retention timeout.
@@ -165,13 +165,13 @@ class TestTensorKeeperCleanup:
 class TestRegistryCleanup:
     """Tests for registry refcount and cleanup."""
 
-    def test_singleton_registry_refcount(self):
+    def test_singleton_registry_refcount(self) -> None:
         """Verify singleton instances are tracked in registry."""
 
         class CountedService(ProxiedSingleton):
             instances_created = 0
 
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 CountedService.instances_created += 1
 
@@ -189,7 +189,7 @@ class TestRegistryCleanup:
         SingletonMetaclass._instances.clear()
         assert CountedService not in SingletonMetaclass._instances
 
-    def test_registry_cleanup_on_instance_delete(self):
+    def test_registry_cleanup_on_instance_delete(self) -> None:
         """Verify registry doesn't prevent GC when manually cleared."""
 
         class TrackedService(ProxiedSingleton):
@@ -220,18 +220,18 @@ class TestRegistryCleanup:
 class TestMemoryLeakScenarios:
     """Tests for specific memory leak scenarios."""
 
-    def test_circular_reference_singleton(self):
+    def test_circular_reference_singleton(self) -> None:
         """Verify circular references don't prevent collection."""
 
         class NodeA(ProxiedSingleton):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
-                self.ref = None
+                self.ref: NodeB | None = None
 
         class NodeB(ProxiedSingleton):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
-                self.ref = None
+                self.ref: NodeA | None = None
 
         # Create circular reference
         a = NodeA()
@@ -254,11 +254,11 @@ class TestMemoryLeakScenarios:
         assert weak_a() is None, "NodeA not collected (circular ref)"
         assert weak_b() is None, "NodeB not collected (circular ref)"
 
-    def test_exception_during_init_no_leak(self):
+    def test_exception_during_init_no_leak(self) -> None:
         """Verify exceptions during __init__ don't leak memory."""
 
         class FailingService(ProxiedSingleton):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 raise ValueError("Init failed")
 

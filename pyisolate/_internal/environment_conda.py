@@ -276,6 +276,7 @@ def create_conda_env(env_path: Path, config: ExtensionConfig, name: str) -> None
     env_path.mkdir(parents=True, exist_ok=True)
 
     from pyisolate._internal.pixi_provisioner import ensure_pixi
+
     pixi_path = ensure_pixi()
 
     cuda_wheels_config = config.get("cuda_wheels")

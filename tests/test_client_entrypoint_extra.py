@@ -1,3 +1,4 @@
+from typing import Any, cast
 import importlib
 import sys
 from types import ModuleType
@@ -11,7 +12,7 @@ from pyisolate.shared import ExtensionBase
 
 
 class DummyExtension(ExtensionBase):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.before_called = False
         self.loaded_called = False
@@ -25,13 +26,14 @@ class DummyExtension(ExtensionBase):
 
 
 @pytest.mark.asyncio
-async def test_async_entrypoint_runs_hooks_and_registers(tmp_path, monkeypatch):
+async def test_async_entrypoint_runs_hooks_and_registers(tmp_path: Any, monkeypatch: Any) -> Any:
     module_dir = tmp_path / "ext"
     module_dir.mkdir()
     (module_dir / "__init__.py").write_text("VALUE = 42\n")
 
     config: ExtensionConfig = {
         "name": "demo",
+        "isolated": True,
         "dependencies": [],
         "share_torch": False,
         "share_cuda_ipc": False,
@@ -39,17 +41,17 @@ async def test_async_entrypoint_runs_hooks_and_registers(tmp_path, monkeypatch):
     }
 
     class FakeRPC:
-        def __init__(self, recv_queue=None, send_queue=None):  # noqa: ARG002
-            self.registered = []
+        def __init__(self, recv_queue: Any = None, send_queue: Any = None) -> None:  # noqa: ARG002
+            self.registered: list[tuple[Any, Any]] = []
             self.running = False
 
-        def register_callee(self, obj, object_id):
+        def register_callee(self, obj: Any, object_id: Any) -> None:
             self.registered.append((obj, object_id))
 
-        def run(self):
+        def run(self) -> None:
             self.running = True
 
-        async def run_until_stopped(self):
+        async def run_until_stopped(self) -> Any:
             return None
 
     monkeypatch.setattr(client, "AsyncRPC", FakeRPC)
@@ -70,9 +72,10 @@ async def test_async_entrypoint_runs_hooks_and_registers(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_async_entrypoint_rejects_missing_dir(tmp_path):
+async def test_async_entrypoint_rejects_missing_dir(tmp_path: Any) -> None:
     config: ExtensionConfig = {
         "name": "demo",
+        "isolated": True,
         "dependencies": [],
         "share_torch": False,
         "share_cuda_ipc": False,
@@ -92,7 +95,7 @@ async def test_async_entrypoint_rejects_missing_dir(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_async_entrypoint_uses_inference_mode(monkeypatch, tmp_path):
+async def test_async_entrypoint_uses_inference_mode(monkeypatch: Any, tmp_path: Any) -> Any:
     module_dir = tmp_path / "ext2"
     module_dir.mkdir()
     (module_dir / "__init__.py").write_text("VALUE = 1\n")
@@ -100,21 +103,22 @@ async def test_async_entrypoint_uses_inference_mode(monkeypatch, tmp_path):
     entered = {"count": 0}
 
     class DummyInference:
-        def __enter__(self):
+        def __enter__(self) -> Any:
             entered["count"] += 1
             return self
 
-        def __exit__(self, exc_type, exc, tb):  # noqa: ANN001
+        def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> Any:  # noqa: ANN001
             return False
 
     class DummyTorch:
-        def inference_mode(self):
+        def inference_mode(self) -> Any:
             return DummyInference()
 
     monkeypatch.setitem(sys.modules, "torch", DummyTorch())
 
     config: ExtensionConfig = {
         "name": "demo2",
+        "isolated": True,
         "dependencies": [],
         "share_torch": True,
         "share_cuda_ipc": False,
@@ -122,16 +126,16 @@ async def test_async_entrypoint_uses_inference_mode(monkeypatch, tmp_path):
     }
 
     class FakeRPC:
-        def __init__(self, recv_queue=None, send_queue=None):  # noqa: ARG002
+        def __init__(self, recv_queue: Any = None, send_queue: Any = None) -> None:  # noqa: ARG002
             pass
 
-        def register_callee(self, *_):
+        def register_callee(self, *_: Any) -> Any:
             return None
 
-        def run(self):
+        def run(self) -> Any:
             return None
 
-        async def run_until_stopped(self):
+        async def run_until_stopped(self) -> Any:
             return None
 
     monkeypatch.setattr(client, "AsyncRPC", FakeRPC)
@@ -150,43 +154,46 @@ async def test_async_entrypoint_uses_inference_mode(monkeypatch, tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_async_entrypoint_registers_apis_with_adapter(monkeypatch, tmp_path):
+async def test_async_entrypoint_registers_apis_with_adapter(monkeypatch: Any, tmp_path: Any) -> Any:
     module_dir = tmp_path / "ext3"
     module_dir.mkdir()
     (module_dir / "__init__.py").write_text("VALUE = 3\n")
 
     class DummyAPI(ProxiedSingleton):
+        last_rpc: Any = None
+
         @classmethod
-        def use_remote(cls, rpc):  # noqa: ANN001
+        def use_remote(cls, rpc: Any) -> None:  # noqa: ANN001
             cls.last_rpc = rpc
 
     class DummyAdapter:
-        def __init__(self):
-            self.calls = []
+        def __init__(self) -> None:
+            self.calls: list[tuple[Any, Any]] = []
 
-        def handle_api_registration(self, api_instance, rpc):
+        def handle_api_registration(self, api_instance: Any, rpc: Any) -> None:
             self.calls.append((api_instance, rpc))
 
     dummy_adapter = DummyAdapter()
     monkeypatch.setattr(client, "_adapter", dummy_adapter)
 
     class FakeRPC:
-        def __init__(self, recv_queue=None, send_queue=None):  # noqa: ARG002
+        def __init__(self, recv_queue: Any = None, send_queue: Any = None) -> None:  # noqa: ARG002
             pass
 
-        def register_callee(self, *_):
+        def register_callee(self, *_: Any) -> Any:
             return None
 
-        def run(self):
+        def run(self) -> Any:
             return None
 
-        async def run_until_stopped(self):
+        async def run_until_stopped(self) -> Any:
             return None
 
     monkeypatch.setattr(client, "AsyncRPC", FakeRPC)
 
     config: ExtensionConfig = {
         "name": "demo3",
+        "isolated": True,
         "dependencies": [],
         "share_torch": False,
         "share_cuda_ipc": False,
@@ -207,17 +214,21 @@ async def test_async_entrypoint_registers_apis_with_adapter(monkeypatch, tmp_pat
     assert dummy_adapter.calls
 
 
-def test_sealed_worker_skips_api_class_import(monkeypatch):
-    config = {
-        "name": "demo-sealed",
-        "dependencies": [],
-        "share_torch": False,
-        "share_cuda_ipc": False,
-        "execution_model": "sealed_worker",
-        "apis": ["forbidden.module.ForbiddenAPI"],
-    }
+def test_sealed_worker_skips_api_class_import(monkeypatch: Any) -> Any:
+    config = cast(
+        ExtensionConfig,
+        {
+            "name": "demo-sealed",
+            "isolated": True,
+            "dependencies": [],
+            "share_torch": False,
+            "share_cuda_ipc": False,
+            "execution_model": "sealed_worker",
+            "apis": ["forbidden.module.ForbiddenAPI"],
+        },
+    )
 
-    def _forbidden_import(name: str, package: str | None = None):  # noqa: ARG001
+    def _forbidden_import(name: str, package: str | None = None) -> Any:  # noqa: ARG001
         if name == "forbidden.module":
             raise AssertionError("sealed worker must not import API classes from config")
         return importlib.import_module(name)

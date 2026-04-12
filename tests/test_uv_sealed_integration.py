@@ -11,11 +11,13 @@ import subprocess
 import sys
 import uuid
 from pathlib import Path
+from typing import cast
 
 import pytest
 import torch  # noqa: E402
 
 from pyisolate._internal.host import Extension  # noqa: E402
+from pyisolate.config import ExtensionConfig  # noqa: E402
 from pyisolate.sealed import SealedNodeExtension  # noqa: E402
 
 UV_BIN = Path(sys.executable).with_name("uv.exe" if os.name == "nt" else "uv")
@@ -44,9 +46,11 @@ def _host_site_root() -> str:
     return str(Path(sys.executable).resolve().parents[1])
 
 
-def _build_uv_config(fixture_path: Path, run_dir: Path) -> dict:
+def _build_uv_config(fixture_path: Path, run_dir: Path) -> ExtensionConfig:
     # Inlined from fixtures/uv_sealed_worker/pyproject.toml — no TOML parser needed.
-    return {
+    return cast(
+        ExtensionConfig,
+        {
         "name": "uv-sealed-worker",
         "module_path": str(fixture_path),
         "isolated": True,
@@ -61,7 +65,8 @@ def _build_uv_config(fixture_path: Path, run_dir: Path) -> dict:
         "sandbox": {"writable_paths": [str(run_dir / "artifacts")]},
         "package_manager": "uv",
         "execution_model": "sealed_worker",
-    }
+        },
+    )
 
 
 @pytest.mark.asyncio

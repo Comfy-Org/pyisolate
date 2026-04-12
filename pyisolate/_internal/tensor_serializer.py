@@ -622,6 +622,7 @@ def register_sealed_tensor_deserializer(registry: Any) -> None:
     Sealed workers receive tensors as JSON TensorValue dicts. This registers
     a numpy-only deserializer so the data arrives as numpy arrays, not raw dicts.
     """
+
     def deserializer(data: dict[str, Any]) -> Any:
         return _deserialize_json_tensor(data)
 

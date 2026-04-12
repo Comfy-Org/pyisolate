@@ -12,7 +12,7 @@ from pyisolate._internal.rpc_protocol import ProxiedSingleton
 class TestExtensionManagerConfig:
     """Tests for ExtensionManagerConfig TypedDict."""
 
-    def test_minimal_config(self, tmp_path: Path):
+    def test_minimal_config(self, tmp_path: Path) -> None:
         """Minimal config requires only venv_root_path."""
         config: ExtensionManagerConfig = {
             "venv_root_path": str(tmp_path / "venvs"),
@@ -20,7 +20,7 @@ class TestExtensionManagerConfig:
 
         assert "venv_root_path" in config
 
-    def test_venv_root_path_is_string(self, tmp_path: Path):
+    def test_venv_root_path_is_string(self, tmp_path: Path) -> None:
         """venv_root_path must be a string path."""
         config: ExtensionManagerConfig = {
             "venv_root_path": str(tmp_path / "venvs"),
@@ -32,7 +32,7 @@ class TestExtensionManagerConfig:
 class TestExtensionConfigValidation:
     """Tests for ExtensionConfig field validation."""
 
-    def test_name_must_be_nonempty(self):
+    def test_name_must_be_nonempty(self) -> None:
         """Extension name should not be empty."""
         config: ExtensionConfig = {
             "name": "",  # Invalid but TypedDict doesn't enforce
@@ -48,7 +48,7 @@ class TestExtensionConfigValidation:
         # empty name would cause issues. Runtime validation needed.
         assert config["name"] == ""
 
-    def test_module_path_can_be_relative(self):
+    def test_module_path_can_be_relative(self) -> None:
         """Module path can be relative."""
         config: ExtensionConfig = {
             "name": "myext",
@@ -62,7 +62,7 @@ class TestExtensionConfigValidation:
 
         assert config["module_path"] == "./extensions/myext"
 
-    def test_module_path_can_be_absolute(self):
+    def test_module_path_can_be_absolute(self) -> None:
         """Module path can be absolute."""
         config: ExtensionConfig = {
             "name": "myext",
@@ -76,7 +76,7 @@ class TestExtensionConfigValidation:
 
         assert config["module_path"] == "/app/extensions/myext"
 
-    def test_dependencies_format(self):
+    def test_dependencies_format(self) -> None:
         """Dependencies are pip requirement specifiers."""
         config: ExtensionConfig = {
             "name": "myext",
@@ -95,7 +95,7 @@ class TestExtensionConfigValidation:
         assert len(config["dependencies"]) == 3
         assert "numpy>=1.20" in config["dependencies"]
 
-    def test_apis_are_singleton_types(self):
+    def test_apis_are_singleton_types(self) -> None:
         """APIs list contains ProxiedSingleton subclasses."""
 
         class MyService(ProxiedSingleton):
@@ -114,7 +114,7 @@ class TestExtensionConfigValidation:
         assert MyService in config["apis"]
         assert issubclass(config["apis"][0], ProxiedSingleton)
 
-    def test_share_torch_implies_requirements(self):
+    def test_share_torch_implies_requirements(self) -> None:
         """share_torch=True has implications for tensor handling."""
         config: ExtensionConfig = {
             "name": "ml_ext",
@@ -130,7 +130,7 @@ class TestExtensionConfigValidation:
         # share_cuda_ipc can be independently configured
         assert config["share_cuda_ipc"] is False
 
-    def test_share_cuda_ipc_requires_share_torch(self):
+    def test_share_cuda_ipc_requires_share_torch(self) -> None:
         """share_cuda_ipc only makes sense with share_torch."""
         # This is a semantic constraint, not enforced by TypedDict
         config: ExtensionConfig = {
@@ -150,7 +150,7 @@ class TestExtensionConfigValidation:
 class TestConfigDefaults:
     """Tests documenting expected config defaults."""
 
-    def test_isolated_defaults_true(self):
+    def test_isolated_defaults_true(self) -> None:
         """When creating configs, isolated typically defaults True."""
         # This documents expected behavior for config factories
         default_isolated = True
@@ -167,7 +167,7 @@ class TestConfigDefaults:
 
         assert config["isolated"] is True
 
-    def test_share_torch_defaults_false(self):
+    def test_share_torch_defaults_false(self) -> None:
         """share_torch defaults to False for safety."""
         default_share_torch = False
 
@@ -183,7 +183,7 @@ class TestConfigDefaults:
 
         assert config["share_torch"] is False
 
-    def test_dependencies_defaults_empty(self):
+    def test_dependencies_defaults_empty(self) -> None:
         """dependencies defaults to empty list."""
         config: ExtensionConfig = {
             "name": "ext",
@@ -197,7 +197,7 @@ class TestConfigDefaults:
 
         assert config["dependencies"] == []
 
-    def test_apis_defaults_empty(self):
+    def test_apis_defaults_empty(self) -> None:
         """apis defaults to empty list."""
         config: ExtensionConfig = {
             "name": "ext",
