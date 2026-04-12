@@ -473,7 +473,10 @@ def _deserialize_json_tensor(data: dict[str, Any]) -> Any:
         "torch.bool": np.bool_,
     }
     dtype_str = data["dtype"]
-    np_dtype = torch_to_numpy_dtype.get(dtype_str, np.float32)
+    if dtype_str not in torch_to_numpy_dtype:
+        supported = ", ".join(sorted(torch_to_numpy_dtype))
+        raise ValueError(f"Unsupported TensorValue dtype {dtype_str!r}. Supported dtypes: {supported}")
+    np_dtype = torch_to_numpy_dtype[dtype_str]
     arr = np.array(data["data"], dtype=np_dtype).reshape(tuple(data["tensor_size"]))
     return arr
 

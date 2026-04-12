@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from pyisolate._internal.serialization_registry import SerializerRegistry
 from pyisolate._internal.singleton_context import singleton_scope
@@ -35,7 +36,6 @@ class TestSealedNdarrayTransport:
             assert result["tensor_size"] == [1, 64, 64, 3]
             assert result["requires_grad"] is False
             assert isinstance(result["data"], list)
-            print(f"RESULT_TYPE={result['__type__']}")
 
     def test_wrap_for_transport_passes_ndarray_inline(self) -> None:
         """_wrap_for_transport does NOT wrap ndarray as RemoteObjectHandle."""
@@ -50,4 +50,15 @@ class TestSealedNdarrayTransport:
             assert not isinstance(wrapped, RemoteObjectHandle)
             # Should still be ndarray (serializer runs at JSON encode time, not at wrap time)
             assert isinstance(wrapped, np.ndarray)
-            print(f"WRAPPED_TYPE={type(wrapped).__name__}")
+
+    def test_unsupported_ndarray_dtype_raises(self) -> None:
+        """Unsupported ndarray dtypes fail fast instead of silently downcasting."""
+        with singleton_scope():
+            SealedNodeExtension()
+            registry = SerializerRegistry.get_instance()
+            serializer = registry.get_serializer("ndarray")
+            assert serializer is not None
+
+            arr = np.array(["x", "y"], dtype=np.str_)
+            with pytest.raises(TypeError, match="Unsupported ndarray dtype"):
+                serializer(arr)

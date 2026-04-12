@@ -12,10 +12,13 @@ _SANDBOX_AVAILABLE = False
 if sys.platform == "linux":
     _SANDBOX_AVAILABLE = detect_sandbox_capability().available
 
-pytestmark = pytest.mark.skipif(
-    not _SANDBOX_AVAILABLE,
-    reason="filesystem barrier checks require a working Linux bubblewrap sandbox",
-)
+pytestmark = [
+    pytest.mark.network,
+    pytest.mark.skipif(
+        not _SANDBOX_AVAILABLE,
+        reason="filesystem barrier checks require a working Linux bubblewrap sandbox",
+    ),
+]
 
 
 @pytest.mark.asyncio

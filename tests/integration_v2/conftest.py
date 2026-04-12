@@ -9,8 +9,8 @@ from tests.harness.host import ReferenceHost
 async def reference_host() -> AsyncGenerator[ReferenceHost, None]:
     """Provides a ReferenceHost instance."""
     host = ReferenceHost()
-    host.setup()
     try:
+        host.setup()
         yield host
     finally:
         await host.cleanup()

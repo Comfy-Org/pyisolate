@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import sys
 from enum import Enum
-from typing import TYPE_CHECKING, Any, TypedDict
+from typing import TYPE_CHECKING, TypedDict
 
 if sys.version_info >= (3, 11):
     from typing import NotRequired
@@ -86,7 +86,7 @@ class ExtensionConfig(TypedDict):
     share_cuda_ipc: bool
     """If True, attempt CUDA IPC-based tensor transport (Linux only, requires ``share_torch``)."""
 
-    sandbox: NotRequired[dict[str, Any]]
+    sandbox: NotRequired[SandboxConfig]
     """Configuration for the sandbox (e.g. writable_paths, network access)."""
 
     sandbox_mode: NotRequired[SandboxMode]

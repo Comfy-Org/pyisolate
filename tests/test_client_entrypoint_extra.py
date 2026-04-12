@@ -228,10 +228,12 @@ def test_sealed_worker_skips_api_class_import(monkeypatch: Any) -> Any:
         },
     )
 
-    def _forbidden_import(name: str, package: str | None = None) -> Any:  # noqa: ARG001
+    real_import_module = importlib.import_module
+
+    def _forbidden_import(name: str, package: str | None = None) -> Any:
         if name == "forbidden.module":
             raise AssertionError("sealed worker must not import API classes from config")
-        return importlib.import_module(name)
+        return real_import_module(name, package)
 
     monkeypatch.setattr(importlib, "import_module", _forbidden_import)
 

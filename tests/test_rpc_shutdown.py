@@ -135,3 +135,29 @@ async def test_shutdown_cancels_run_until_stopped() -> None:
     # Should be done now
     await asyncio.wait_for(stop_task, timeout=1.0)
     assert stop_task.done()
+
+
+@pytest.mark.asyncio
+async def test_recv_none_fails_pending_requests() -> None:
+    """A recv-side sentinel should fail pending requests instead of leaving them dangling."""
+    rpc = AsyncRPC(transport=MockTransport())
+    loop = asyncio.get_running_loop()
+    future: asyncio.Future[Any] = loop.create_future()
+    rpc.pending[7] = {
+        "kind": "call",
+        "object_id": "obj",
+        "parent_call_id": None,
+        "calling_loop": loop,
+        "future": future,
+        "method": "ping",
+        "args": (),
+        "kwargs": {},
+    }
+    rpc.blocking_future = loop.create_future()
+
+    rpc._recv_thread()
+    await asyncio.sleep(0)
+
+    assert future.done()
+    with pytest.raises(ConnectionError, match="RPC connection closed"):
+        future.result()

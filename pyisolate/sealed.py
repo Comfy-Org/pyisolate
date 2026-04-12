@@ -77,9 +77,10 @@ class SealedNodeExtension(ExtensionBase):
 
         def serialize_ndarray_as_tensor_value(obj: Any) -> dict[str, Any]:
             arr = np.asarray(obj)
-            dtype_str = numpy_to_torch_dtype.get(arr.dtype.type, "torch.float32")
             if arr.dtype.type not in numpy_to_torch_dtype:
-                arr = arr.astype(np.float32)
+                supported = ", ".join(sorted(dtype.__name__ for dtype in numpy_to_torch_dtype))
+                raise TypeError(f"Unsupported ndarray dtype {arr.dtype}. Supported dtypes: {supported}")
+            dtype_str = numpy_to_torch_dtype[arr.dtype.type]
             return {
                 "__type__": "TensorValue",
                 "dtype": dtype_str,

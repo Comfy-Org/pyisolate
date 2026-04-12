@@ -95,6 +95,29 @@ def _verify_checksum(data: bytes, expected_hex: str) -> None:
         raise RuntimeError(f"pixi binary checksum mismatch: expected {expected_hex}, got {actual}")
 
 
+def _safe_extract_member(
+    *,
+    cache: Path,
+    member_name: str,
+    binary_name: str,
+    data: bytes,
+    mode: int | None = None,
+) -> Path:
+    relative_member = Path(member_name)
+    target = (cache / relative_member.name).resolve()
+    cache_root = cache.resolve()
+    if target.parent != cache_root:
+        raise RuntimeError(f"Unsafe pixi archive path: {member_name}")
+
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(data)
+    if mode is not None:
+        target.chmod(mode)
+    elif target.name == binary_name:
+        target.chmod(target.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
+    return target
+
+
 def ensure_pixi(version: str | None = None) -> str:
     """Return path to pixi binary, downloading if necessary.
 
@@ -151,8 +174,13 @@ def ensure_pixi(version: str | None = None) -> str:
                         if member.endswith(binary_name):
                             member_name = member
                             break
-                zf.extract(member_name, path=str(cache))
-                extracted = cache / member_name
+                with zf.open(member_name) as member_fp:
+                    extracted = _safe_extract_member(
+                        cache=cache,
+                        member_name=member_name,
+                        binary_name=binary_name,
+                        data=member_fp.read(),
+                    )
         else:
             with tarfile.open(tmp_path, "r:gz") as tf:
                 members = tf.getnames()
@@ -162,8 +190,18 @@ def ensure_pixi(version: str | None = None) -> str:
                         if member.endswith(binary_name):
                             member_name = member
                             break
-                tf.extract(member_name, path=str(cache))
-                extracted = cache / member_name
+                tar_member = tf.getmember(member_name)
+                tar_member_fp = tf.extractfile(tar_member)
+                if tar_member_fp is None:
+                    raise RuntimeError(f"pixi archive member has no data: {member_name}")
+                with tar_member_fp:
+                    extracted = _safe_extract_member(
+                        cache=cache,
+                        member_name=member_name,
+                        binary_name=binary_name,
+                        data=tar_member_fp.read(),
+                        mode=tar_member.mode,
+                    )
 
         if extracted != cached_binary:
             extracted.rename(cached_binary)

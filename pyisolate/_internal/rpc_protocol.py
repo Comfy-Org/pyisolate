@@ -334,6 +334,20 @@ class AsyncRPC:
                 if t.is_alive() and t is not threading.current_thread():
                     t.join(timeout=2.0)
 
+    def _fail_pending_requests(self, error_msg: str) -> None:
+        with self.lock:
+            pending_items = list(self.pending.values())
+            self.pending.clear()
+
+        for pending_item in pending_items:
+            fut = pending_item["future"]
+            calling_loop = pending_item["calling_loop"]
+            self._schedule_future_resolution(
+                calling_loop,
+                fut,
+                exc=ConnectionError(error_msg),
+            )
+
     def run(self) -> None:
         self.blocking_future = self.default_loop.create_future()
         self._threads = [
@@ -482,18 +496,7 @@ class AsyncRPC:
                     # Fail all pending requests when connection dies
                     # preventing indefinite hangs in the host
                     error_msg = f"RPC connection lost: {exc}"
-                    with self.lock:
-                        pending_items = list(self.pending.values())
-                        self.pending.clear()
-
-                    for item in pending_items:
-                        fut = item["future"]
-                        calling_loop = item["calling_loop"]
-                        self._schedule_future_resolution(
-                            calling_loop,
-                            fut,
-                            exc=ConnectionError(error_msg),
-                        )
+                    self._fail_pending_requests(error_msg)
 
                     # Resolve blocking_future to unblock run_until_stopped
                     if self.blocking_future and not self.blocking_future.done():
@@ -505,6 +508,7 @@ class AsyncRPC:
                     break
 
                 if item is None:
+                    self._fail_pending_requests("RPC connection closed")
                     if self.blocking_future:
                         try:
                             loop = self._get_valid_loop(self.default_loop)

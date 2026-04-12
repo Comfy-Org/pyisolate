@@ -5,8 +5,7 @@ These tests verify configuration validation without spawning processes.
 
 from pathlib import Path
 
-from pyisolate import ExtensionConfig, ExtensionManagerConfig
-from pyisolate._internal.rpc_protocol import ProxiedSingleton
+from pyisolate import ExtensionConfig, ExtensionManagerConfig, ProxiedSingleton
 
 
 class TestExtensionManagerConfig:

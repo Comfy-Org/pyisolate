@@ -62,7 +62,9 @@ def _build_conda_config(fixture_path: Path, run_dir: Path) -> ExtensionConfig:
 
 
 @pytest.mark.asyncio
+@pytest.mark.network
 async def test_conda_sealed_runtime_avoids_host_path_leakage() -> None:
+    """Networked conda integration test; expected slow (~30s)."""
     fixture_path = Path(__file__).resolve().parent / "fixtures" / "conda_sealed_node"
     run_root = Path(__file__).resolve().parent.parent / ".pytest_artifacts" / "conda_integration"
     run_dir = run_root / uuid.uuid4().hex

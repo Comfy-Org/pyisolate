@@ -525,7 +525,7 @@ def test_resolve_iterates_multiple_indexes(monkeypatch: Any) -> None:
     assert "pozzettiandrea" in url
 
 
-# ── Live network tests ────────────────────────────────────────────────
+# ── Live network tests (real network/venv work; expected slow: ~30s each) ───
 
 
 @pytest.mark.network
@@ -785,3 +785,87 @@ def test_share_torch_named_packages_can_install_with_no_deps(tmp_path: Any, monk
     assert "timm" in popen_calls[1]
     assert "--no-deps" in popen_calls[2]
     assert any("cc_torch-0.2-py3-none-any.whl" in token for token in popen_calls[2])
+
+
+def test_share_torch_no_deps_applies_without_cuda_wheels(tmp_path: Any, monkeypatch: Any) -> None:
+    """Named share_torch packages still split into a no-deps install without CUDA wheels."""
+    from pyisolate._internal.environment import install_dependencies
+
+    venv_path = tmp_path / "venvs" / "test-ext"
+    _fake_venv_python(venv_path)
+
+    config = {
+        "name": "test-ext",
+        "module_path": str(tmp_path),
+        "isolated": True,
+        "dependencies": ["timm", "pyyaml"],
+        "apis": [],
+        "share_torch": True,
+        "share_torch_no_deps": ["timm"],
+        "share_cuda_ipc": False,
+        "sandbox_mode": SandboxMode.DISABLED,
+        "sandbox": {},
+    }
+
+    popen_calls: list[list[str]] = []
+
+    class FakeProc:
+        def __init__(self, cmd: Any, **kwargs: Any) -> None:
+            popen_calls.append(cmd)
+            self.stdout: Any = iter([])
+            self.returncode = 0
+
+        def __enter__(self) -> Any:
+            return self
+
+        def __exit__(self, *args: Any) -> Any:
+            return False
+
+        def wait(self) -> Any:
+            return 0
+
+    monkeypatch.setattr("subprocess.Popen", FakeProc)
+    monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/uv")
+    monkeypatch.setattr(
+        "pyisolate._internal.environment.exclude_satisfied_requirements",
+        lambda config, reqs, python_exe: reqs,
+    )
+
+    install_dependencies(venv_path, cast(ExtensionConfig, config), "test-ext")
+
+    assert len(popen_calls) == 2
+    assert "--no-deps" not in popen_calls[0]
+    assert "pyyaml" in popen_calls[0]
+    assert "timm" not in popen_calls[0]
+    assert "--no-deps" in popen_calls[1]
+    assert "timm" in popen_calls[1]
+
+
+def test_share_torch_no_deps_rejects_invalid_type(tmp_path: Any, monkeypatch: Any) -> None:
+    """Invalid share_torch_no_deps config should fail fast."""
+    from pyisolate._internal.environment import install_dependencies
+
+    venv_path = tmp_path / "venvs" / "test-ext"
+    _fake_venv_python(venv_path)
+
+    config = {
+        "name": "test-ext",
+        "module_path": str(tmp_path),
+        "isolated": True,
+        "dependencies": ["timm"],
+        "apis": [],
+        "share_torch": True,
+        "share_torch_no_deps": "timm",
+        "share_cuda_ipc": False,
+        "sandbox_mode": SandboxMode.DISABLED,
+        "sandbox": {},
+    }
+
+    monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/uv")
+    monkeypatch.setattr(
+        "pyisolate._internal.environment.exclude_satisfied_requirements",
+        lambda config, reqs, python_exe: reqs,
+    )
+
+    with pytest.raises(TypeError, match="share_torch_no_deps"):
+        install_dependencies(venv_path, cast(ExtensionConfig, config), "test-ext")

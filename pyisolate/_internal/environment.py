@@ -529,8 +529,20 @@ def install_dependencies(venv_path: Path, config: ExtensionConfig, name: str) ->
             detail = "\n".join(output_lines) or "(no output)"
             raise RuntimeError(f"Install failed for {name}: {detail}")
 
+    share_torch_no_deps = config.get("share_torch_no_deps", [])
+    if not isinstance(share_torch_no_deps, list):
+        raise TypeError(
+            "share_torch_no_deps must be a list of dependency names, "
+            f"got {type(share_torch_no_deps).__name__}: {share_torch_no_deps!r}"
+        )
+
+    share_torch_no_deps_names = {canonicalize_name(dep_name) for dep_name in share_torch_no_deps}
+    regular_targets: list[str] = []
+    share_torch_no_deps_targets: list[str] = []
+    cuda_wheel_targets: list[str] = []
+    cuda_package_dirs: set[str] = set()
+
     if cuda_wheels_config:
-        cuda_package_dirs: set[str] = set()
         package_map = cuda_wheels_config.get("package_map", {})
         for package_name in cuda_wheels_config.get("packages", []):
             for candidate in (
@@ -550,38 +562,33 @@ def install_dependencies(venv_path: Path, config: ExtensionConfig, name: str) ->
                     if candidate:
                         cuda_package_dirs.add(candidate)
 
-        regular_targets: list[str] = []
-        share_torch_no_deps_targets: list[str] = []
-        cuda_wheel_targets: list[str] = []
-        share_torch_no_deps = config.get("share_torch_no_deps", [])
-        if not isinstance(share_torch_no_deps, list):
-            share_torch_no_deps = []
-        share_torch_no_deps_names = {canonicalize_name(dep_name) for dep_name in share_torch_no_deps}
-        for target in install_targets:
-            if "://" not in target:
-                if config["share_torch"]:
-                    try:
-                        target_name: str = canonicalize_name(Requirement(target).name)
-                    except InvalidRequirement:
-                        target_name = ""
-                    if target_name and target_name in share_torch_no_deps_names:
-                        share_torch_no_deps_targets.append(target)
-                        continue
-                regular_targets.append(target)
-                continue
-            parsed = urlparse(target)
-            wheel_name = Path(parsed.path).name
-            distribution_name = ""
-            try:
-                distribution_name, _, _, _ = parse_wheel_filename(wheel_name)
-            except Exception:
-                distribution_name = ""
-            normalized_distribution = distribution_name.replace("-", "_")
-            if normalized_distribution in cuda_package_dirs:
-                cuda_wheel_targets.append(target)
-            else:
-                regular_targets.append(target)
+    for target in install_targets:
+        if "://" not in target:
+            if config["share_torch"]:
+                try:
+                    target_name: str = canonicalize_name(Requirement(target).name)
+                except InvalidRequirement:
+                    target_name = ""
+                if target_name and target_name in share_torch_no_deps_names:
+                    share_torch_no_deps_targets.append(target)
+                    continue
+            regular_targets.append(target)
+            continue
 
+        parsed = urlparse(target)
+        wheel_name = Path(parsed.path).name
+        distribution_name = ""
+        try:
+            distribution_name, _, _, _ = parse_wheel_filename(wheel_name)
+        except Exception:
+            distribution_name = ""
+        normalized_distribution = distribution_name.replace("-", "_")
+        if cuda_wheels_config and normalized_distribution in cuda_package_dirs:
+            cuda_wheel_targets.append(target)
+        else:
+            regular_targets.append(target)
+
+    if cuda_wheels_config:
         if cuda_wheel_targets:
             redacted_targets = [
                 f"{urlparse(t).netloc}/{Path(urlparse(t).path).name}" for t in cuda_wheel_targets
@@ -612,7 +619,18 @@ def install_dependencies(venv_path: Path, config: ExtensionConfig, name: str) ->
                 log_cuda_wheels=True,
             )
     else:
-        _run_uv_install(cmd_prefix + install_targets + common_args, log_cuda_wheels=False)
+        if regular_targets:
+            _run_uv_install(cmd_prefix + regular_targets + common_args, log_cuda_wheels=False)
+        if share_torch_no_deps_targets:
+            logger.info(
+                "][ TORCH_SHARE_NO_DEPS_INSTALL ext=%s targets=%s",
+                name,
+                share_torch_no_deps_targets,
+            )
+            _run_uv_install(
+                cmd_prefix + ["--no-deps"] + share_torch_no_deps_targets + common_args,
+                log_cuda_wheels=False,
+            )
 
     lock_path.write_text(
         json.dumps({"fingerprint": fingerprint, "descriptor": descriptor}, indent=2),

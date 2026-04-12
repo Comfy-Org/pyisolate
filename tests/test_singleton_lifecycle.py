@@ -176,7 +176,7 @@ class TestSingletonScopeIsolation:
 class TestUseRemoteInjection:
     """Tests for use_remote() proxy injection."""
 
-    def test_use_remote_injects_proxy(self) -> Any:
+    def test_use_remote_injects_proxy(self) -> None:
         """Verify use_remote() injects caller as singleton instance."""
 
         class RemoteService(ProxiedSingleton):
@@ -201,7 +201,7 @@ class TestUseRemoteInjection:
         assert instance.cls is RemoteService
         assert instance.object_id == "RemoteService"
 
-    def test_use_remote_requires_proxied_singleton(self) -> Any:
+    def test_use_remote_requires_proxied_singleton(self) -> None:
         """Verify use_remote() only works with ProxiedSingleton subclasses."""
 
         class NotProxied(metaclass=SingletonMetaclass):
@@ -220,7 +220,7 @@ class TestUseRemoteInjection:
 class TestNestedSingletonRegistration:
     """Tests for nested ProxiedSingleton registration."""
 
-    def test_nested_singleton_attributes_get_proxies(self) -> Any:
+    def test_nested_singleton_attributes_get_proxies(self) -> None:
         """Verify type-hinted singleton attributes receive caller proxies."""
 
         class ChildService(ProxiedSingleton):

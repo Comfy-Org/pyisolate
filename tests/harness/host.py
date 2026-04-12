@@ -14,7 +14,7 @@ import tests.harness.test_package as test_package_module
 from pyisolate._internal.adapter_registry import AdapterRegistry
 from pyisolate._internal.rpc_protocol import AsyncRPC, ProxiedSingleton
 from pyisolate._internal.sandbox_detect import detect_sandbox_capability
-from pyisolate.config import ExtensionConfig, SandboxMode
+from pyisolate.config import ExtensionConfig, SandboxConfig, SandboxMode
 from pyisolate.host import Extension
 from pyisolate.interfaces import SerializerRegistryProtocol
 from tests.harness.test_package import ReferenceTestExtension
@@ -145,9 +145,8 @@ class ReferenceHost:
             pass  # We rely on site-packages inheritance for torch usually
 
         # Sandbox Config for IPC
-        sandbox_cfg = {
+        sandbox_cfg: SandboxConfig = {
             "writable_paths": [str(self.shared_tmp)],
-            "doc": "Required for Torch/PyTorch file_system IPC strategy",
         }
 
         ext_config = ExtensionConfig(
@@ -206,12 +205,14 @@ class ReferenceHost:
             os.environ.pop("TMPDIR", None)
 
         if cleanup_errors:
-            pass
+            raise RuntimeError("ReferenceHost cleanup failed: " + "; ".join(cleanup_errors))
 
 
 @pytest.fixture
 async def reference_host() -> AsyncGenerator[ReferenceHost, None]:
     host = ReferenceHost()
-    host.setup()
-    yield host
-    await host.cleanup()
+    try:
+        host.setup()
+        yield host
+    finally:
+        await host.cleanup()

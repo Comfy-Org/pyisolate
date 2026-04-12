@@ -10,7 +10,7 @@ Subordinate to issue #102 Slice 5 via issue #104.
 import asyncio
 import sys
 from collections.abc import Generator
-from typing import Any, cast
+from typing import Any
 
 import pytest
 
@@ -85,14 +85,14 @@ class TestSealedWorkerRPC:
             env={"PYISOLATE_SIGNAL_CLEANUP": "1"},
         )
 
-        ext = Extension(
+        ext: Extension[ReferenceTestExtension] = Extension(
             module_path=package_path,
             extension_type=ReferenceTestExtension,
             config=config,
             venv_root_path=str(host.venv_root),
         )
         ext.ensure_process_started()
-        host.extensions.append(cast(Any, ext))
+        host.extensions.append(ext)
 
         proxy = ext.get_proxy()
         result = _run(proxy.ping())

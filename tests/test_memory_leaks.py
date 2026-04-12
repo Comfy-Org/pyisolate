@@ -85,7 +85,7 @@ class TestProxyGarbageCollection:
 class TestTensorKeeperCleanup:
     """Tests for TensorKeeper memory management."""
 
-    @pytest.fixture
+    @pytest.fixture(autouse=True)
     def fast_tensor_keeper(self, monkeypatch: Any) -> None:
         """Configure TensorKeeper with short retention for testing."""
         from pyisolate._internal.tensor_serializer import TensorKeeper
