@@ -14,7 +14,7 @@ from pyisolate.sealed import SealedNodeExtension
 
 
 @pytest.fixture(autouse=True)
-def clean_registry():
+def clean_registry() -> None:
     SerializerRegistry.get_instance().clear()
 
 
@@ -25,7 +25,7 @@ class _FakeWidget:
         self.value = value
 
 
-def test_sealed_wraps_unregistered_object_as_handle():
+def test_sealed_wraps_unregistered_object_as_handle() -> None:
     ext = SealedNodeExtension()
     widget = _FakeWidget(42)
 
@@ -37,7 +37,7 @@ def test_sealed_wraps_unregistered_object_as_handle():
     assert ext.remote_objects[result.object_id] is widget
 
 
-def test_sealed_resolves_handle_to_original_object():
+def test_sealed_resolves_handle_to_original_object() -> None:
     ext = SealedNodeExtension()
     original = _FakeWidget(99)
     ext.remote_objects["id-1"] = original
@@ -48,7 +48,7 @@ def test_sealed_resolves_handle_to_original_object():
     assert result is original
 
 
-def test_sealed_stale_handle_raises_keyerror():
+def test_sealed_stale_handle_raises_keyerror() -> None:
     ext = SealedNodeExtension()
 
     handle = RemoteObjectHandle("nonexistent", "Foo")
@@ -56,16 +56,15 @@ def test_sealed_stale_handle_raises_keyerror():
         ext._resolve_handles(handle)
 
 
-def test_sealed_ndarray_roundtrip_via_handle():
+def test_sealed_ndarray_roundtrip_via_handle() -> None:
     ext = SealedNodeExtension()
     original = np.ones((100, 100), dtype=np.float32)
 
-    # Wrap — ndarray has no registered serializer so it becomes a handle
+    # ndarray is a registered data_type serializer, so it stays inline.
     wrapped = ext._wrap_for_transport(original)
-    assert isinstance(wrapped, RemoteObjectHandle)
-    assert wrapped.type_name == "ndarray"
+    assert isinstance(wrapped, np.ndarray)
 
-    # Resolve — should return the exact same object
+    # Inline data passes through unchanged.
     resolved = ext._resolve_handles(wrapped)
     assert resolved is original
     assert np.array_equal(original, resolved)

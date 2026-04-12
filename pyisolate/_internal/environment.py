@@ -14,6 +14,8 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
+from packaging.utils import parse_wheel_filename
+
 from ..config import ExtensionConfig
 from ..path_helpers import serialize_host_snapshot
 from .cuda_wheels import (
@@ -90,12 +92,13 @@ def validate_backend_config(config: ExtensionConfig) -> None:
             "Specify at least one channel (e.g. ['conda-forge'])."
         )
 
-    # conda requires pixi on PATH
-    if not shutil.which("pixi"):
-        raise ValueError(
-            "pixi is required for conda backend but not found. "
-            "Install: curl -fsSL https://pixi.sh/install.sh | bash"
-        )
+    # conda requires pixi — auto-provision if not on PATH
+    from pyisolate._internal.pixi_provisioner import ensure_pixi
+
+    try:
+        ensure_pixi()
+    except Exception as e:
+        raise ValueError(f"pixi is required for conda backend but could not be provisioned: {e}") from e
 
 
 logger = logging.getLogger(__name__)
@@ -390,12 +393,12 @@ def install_dependencies(venv_path: Path, config: ExtensionConfig, name: str) ->
     if not safe_deps:
         return
 
+    from packaging.requirements import InvalidRequirement, Requirement
+    from packaging.utils import canonicalize_name
+
     cuda_wheels_config = config.get("cuda_wheels")
     cuda_wheel_runtime: dict[str, object] | None = None
     if cuda_wheels_config:
-        from packaging.requirements import InvalidRequirement, Requirement
-        from packaging.utils import canonicalize_name
-
         cuda_pkg_names = {canonicalize_name(p) for p in cuda_wheels_config.get("packages", [])}
         needs_cuda_probe = False
         for dep in safe_deps:
@@ -436,9 +439,13 @@ def install_dependencies(venv_path: Path, config: ExtensionConfig, name: str) ->
         torch_spec = f"torch=={torch_version}"
         safe_deps.insert(0, torch_spec)
 
+    for extra_url in config.get("extra_index_urls", []):
+        common_args += ["--extra-index-url", extra_url]
+
     descriptor = {
         "dependencies": safe_deps,
         "share_torch": config["share_torch"],
+        "share_torch_no_deps": config.get("share_torch_no_deps", []),
         "torch_spec": torch_spec,
         "cuda_wheels": cuda_wheels_config,
         "cuda_wheel_runtime": cuda_wheel_runtime,
@@ -497,42 +504,133 @@ def install_dependencies(venv_path: Path, config: ExtensionConfig, name: str) ->
             install_targets.append(dep)
         i += 1
 
-    if cuda_wheels_config:
-        redacted_targets = [
-            f"{urlparse(t).netloc}/{Path(urlparse(t).path).name}" if "://" in t else t
-            for t in install_targets
-        ]
-        logger.info(
-            "][ CUDA_WHEEL_INSTALL ext=%s targets=%s",
-            name,
-            redacted_targets,
+    def _run_uv_install(cmd: list[str], *, log_cuda_wheels: bool) -> None:
+        with subprocess.Popen(  # noqa: S603  # Trusted: validated pip/uv install cmd
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+        ) as proc:
+            assert proc.stdout is not None
+            output_lines: list[str] = []
+            for line in proc.stdout:
+                clean = line.rstrip()
+                # Filter out pyisolate install messages to avoid polluting logs
+                # with internal dependency resolution noise that isn't actionable
+                # for users debugging their own extension dependencies.
+                if "pyisolate==" not in clean and "pyisolate @" not in clean:
+                    output_lines.append(clean)
+                    if log_cuda_wheels and clean:
+                        logger.info("][ CUDA_WHEEL_UV ext=%s %s", name, clean)
+            return_code = proc.wait()
+
+        if return_code != 0:
+            detail = "\n".join(output_lines) or "(no output)"
+            raise RuntimeError(f"Install failed for {name}: {detail}")
+
+    share_torch_no_deps = config.get("share_torch_no_deps", [])
+    if not isinstance(share_torch_no_deps, list):
+        raise TypeError(
+            "share_torch_no_deps must be a list of dependency names, "
+            f"got {type(share_torch_no_deps).__name__}: {share_torch_no_deps!r}"
         )
 
-    cmd = cmd_prefix + install_targets + common_args
+    share_torch_no_deps_names = {canonicalize_name(dep_name) for dep_name in share_torch_no_deps}
+    regular_targets: list[str] = []
+    share_torch_no_deps_targets: list[str] = []
+    cuda_wheel_targets: list[str] = []
+    cuda_package_dirs: set[str] = set()
 
-    with subprocess.Popen(  # noqa: S603  # Trusted: validated pip/uv install cmd
-        cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        bufsize=1,
-    ) as proc:
-        assert proc.stdout is not None
-        output_lines: list[str] = []
-        for line in proc.stdout:
-            clean = line.rstrip()
-            # Filter out pyisolate install messages to avoid polluting logs
-            # with internal dependency resolution noise that isn't actionable
-            # for users debugging their own extension dependencies.
-            if "pyisolate==" not in clean and "pyisolate @" not in clean:
-                output_lines.append(clean)
-                if cuda_wheels_config and clean:
-                    logger.info("][ CUDA_WHEEL_UV ext=%s %s", name, clean)
-        return_code = proc.wait()
+    if cuda_wheels_config:
+        package_map = cuda_wheels_config.get("package_map", {})
+        for package_name in cuda_wheels_config.get("packages", []):
+            for candidate in (
+                package_name,
+                package_name.replace("-", "_"),
+                package_name.replace("_", "-"),
+            ):
+                if candidate:
+                    cuda_package_dirs.add(candidate)
+            mapped_name = package_map.get(package_name)
+            if mapped_name:
+                for candidate in (
+                    mapped_name,
+                    mapped_name.replace("-", "_"),
+                    mapped_name.replace("_", "-"),
+                ):
+                    if candidate:
+                        cuda_package_dirs.add(candidate)
 
-    if return_code != 0:
-        detail = "\n".join(output_lines) or "(no output)"
-        raise RuntimeError(f"Install failed for {name}: {detail}")
+    for target in install_targets:
+        if "://" not in target:
+            if config["share_torch"]:
+                try:
+                    target_name: str = canonicalize_name(Requirement(target).name)
+                except InvalidRequirement:
+                    target_name = ""
+                if target_name and target_name in share_torch_no_deps_names:
+                    share_torch_no_deps_targets.append(target)
+                    continue
+            regular_targets.append(target)
+            continue
+
+        parsed = urlparse(target)
+        wheel_name = Path(parsed.path).name
+        distribution_name = ""
+        try:
+            distribution_name, _, _, _ = parse_wheel_filename(wheel_name)
+        except Exception:
+            distribution_name = ""
+        normalized_distribution = distribution_name.replace("-", "_")
+        if cuda_wheels_config and normalized_distribution in cuda_package_dirs:
+            cuda_wheel_targets.append(target)
+        else:
+            regular_targets.append(target)
+
+    if cuda_wheels_config:
+        if cuda_wheel_targets:
+            redacted_targets = [
+                f"{urlparse(t).netloc}/{Path(urlparse(t).path).name}" for t in cuda_wheel_targets
+            ]
+            logger.info(
+                "][ CUDA_WHEEL_INSTALL ext=%s targets=%s",
+                name,
+                redacted_targets,
+            )
+
+        if share_torch_no_deps_targets:
+            logger.info(
+                "][ TORCH_SHARE_NO_DEPS_INSTALL ext=%s targets=%s",
+                name,
+                share_torch_no_deps_targets,
+            )
+
+        if regular_targets:
+            _run_uv_install(cmd_prefix + regular_targets + common_args, log_cuda_wheels=False)
+        if share_torch_no_deps_targets:
+            _run_uv_install(
+                cmd_prefix + ["--no-deps"] + share_torch_no_deps_targets + common_args,
+                log_cuda_wheels=False,
+            )
+        if cuda_wheel_targets:
+            _run_uv_install(
+                cmd_prefix + ["--no-deps"] + cuda_wheel_targets + common_args,
+                log_cuda_wheels=True,
+            )
+    else:
+        if regular_targets:
+            _run_uv_install(cmd_prefix + regular_targets + common_args, log_cuda_wheels=False)
+        if share_torch_no_deps_targets:
+            logger.info(
+                "][ TORCH_SHARE_NO_DEPS_INSTALL ext=%s targets=%s",
+                name,
+                share_torch_no_deps_targets,
+            )
+            _run_uv_install(
+                cmd_prefix + ["--no-deps"] + share_torch_no_deps_targets + common_args,
+                log_cuda_wheels=False,
+            )
 
     lock_path.write_text(
         json.dumps({"fingerprint": fingerprint, "descriptor": descriptor}, indent=2),

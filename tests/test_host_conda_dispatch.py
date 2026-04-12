@@ -4,9 +4,29 @@ from __future__ import annotations
 
 import contextlib
 from pathlib import Path
+from typing import Any, cast
 from unittest.mock import MagicMock, patch
 
 from pyisolate._internal.sandbox_detect import RestrictionModel
+from pyisolate.config import ExtensionConfig
+
+
+def _make_config(**overrides: object) -> ExtensionConfig:
+    config: ExtensionConfig = {
+        "name": "test_ext",
+        "module": "test_module",
+        "dependencies": [],
+        "share_torch": False,
+        "share_cuda_ipc": False,
+        "isolated": True,
+        "apis": [],
+    }
+    return cast(ExtensionConfig, {**config, **overrides})
+
+
+def _call_private_launch(ext: Any) -> Any:
+    return ext._Extension__launch()
+
 
 # ── __launch dispatch ────────────────────────────────────────────────
 
@@ -29,16 +49,11 @@ class TestLaunchDispatchConda:
         from pyisolate._internal.host import Extension
         from pyisolate.shared import ExtensionBase
 
-        config = {
-            "name": "test_ext",
-            "module": "test_module",
-            "dependencies": [],
-            "share_torch": False,
-            "share_cuda_ipc": False,
-            "package_manager": "conda",
-            "conda_channels": ["conda-forge"],
-            "conda_dependencies": ["numpy"],
-        }
+        config = _make_config(
+            package_manager="conda",
+            conda_channels=["conda-forge"],
+            conda_dependencies=["numpy"],
+        )
 
         ext = Extension.__new__(Extension)
         ext.name = "test_ext"
@@ -49,7 +64,7 @@ class TestLaunchDispatchConda:
 
         # Call the private __launch via name mangling
         with patch.object(ext, "_launch_with_uds", return_value=MagicMock()):
-            ext._Extension__launch()
+            _call_private_launch(ext)
 
         mock_create_conda.assert_called_once()
         mock_create_venv.assert_not_called()
@@ -70,14 +85,7 @@ class TestLaunchDispatchConda:
         from pyisolate._internal.host import Extension
         from pyisolate.shared import ExtensionBase
 
-        config = {
-            "name": "test_ext",
-            "module": "test_module",
-            "dependencies": [],
-            "share_torch": False,
-            "share_cuda_ipc": False,
-            "package_manager": "uv",
-        }
+        config = _make_config(package_manager="uv")
 
         ext = Extension.__new__(Extension)
         ext.name = "test_ext"
@@ -87,7 +95,7 @@ class TestLaunchDispatchConda:
         ext.extension_type = ExtensionBase
 
         with patch.object(ext, "_launch_with_uds", return_value=MagicMock()):
-            ext._Extension__launch()
+            _call_private_launch(ext)
 
         mock_create_venv.assert_called_once()
         mock_install_deps.assert_called_once()
@@ -104,16 +112,11 @@ class TestLaunchDispatchConda:
         from pyisolate._internal.host import Extension
         from pyisolate.shared import ExtensionBase
 
-        config = {
-            "name": "test_ext",
-            "module": "test_module",
-            "dependencies": [],
-            "share_torch": False,
-            "share_cuda_ipc": False,
-            "package_manager": "conda",
-            "conda_channels": ["conda-forge"],
-            "conda_dependencies": ["numpy"],
-        }
+        config = _make_config(
+            package_manager="conda",
+            conda_channels=["conda-forge"],
+            conda_dependencies=["numpy"],
+        )
 
         ext = Extension.__new__(Extension)
         ext.name = "test_ext"
@@ -123,7 +126,7 @@ class TestLaunchDispatchConda:
         ext.extension_type = ExtensionBase
 
         with patch.object(ext, "_launch_with_uds", return_value=MagicMock()):
-            ext._Extension__launch()
+            _call_private_launch(ext)
 
         mock_validate.assert_called_once_with(config)
 
@@ -140,14 +143,7 @@ class TestLaunchDispatchConda:
         from pyisolate._internal.host import Extension
         from pyisolate.shared import ExtensionBase
 
-        config = {
-            "name": "test_ext",
-            "module": "test_module",
-            "dependencies": [],
-            "share_torch": False,
-            "share_cuda_ipc": False,
-            "package_manager": "uv",
-        }
+        config = _make_config(package_manager="uv")
 
         ext = Extension.__new__(Extension)
         ext.name = "test_ext"
@@ -157,7 +153,7 @@ class TestLaunchDispatchConda:
         ext.extension_type = ExtensionBase
 
         with patch.object(ext, "_launch_with_uds", return_value=MagicMock()):
-            ext._Extension__launch()
+            _call_private_launch(ext)
 
         mock_validate.assert_called_once_with(config)
 
@@ -173,16 +169,11 @@ class TestPythonExeResolution:
         from pyisolate._internal.host import Extension
         from pyisolate.shared import ExtensionBase
 
-        config = {
-            "name": "test_ext",
-            "module": "test_module",
-            "dependencies": [],
-            "share_torch": False,
-            "share_cuda_ipc": False,
-            "package_manager": "conda",
-            "conda_channels": ["conda-forge"],
-            "conda_dependencies": ["numpy"],
-        }
+        config = _make_config(
+            package_manager="conda",
+            conda_channels=["conda-forge"],
+            conda_dependencies=["numpy"],
+        )
 
         ext = Extension.__new__(Extension)
         ext.name = "test_ext"
@@ -215,7 +206,7 @@ class TestPythonExeResolution:
             # This will fail because we need more mocking, but the key assertion
             # is that _resolve_pixi_python is called for conda backend
             with contextlib.suppress(Exception):
-                ext._launch_with_uds()
+                cast(Any, ext)._launch_with_uds()
 
             mock_resolve.assert_called_once()
 
@@ -233,18 +224,13 @@ class TestCondaSealedWorkerBwrapDispatch:
         from pyisolate._internal.host import Extension
         from pyisolate.shared import ExtensionBase
 
-        config = {
-            "name": "test_ext",
-            "module": "test_module",
-            "dependencies": [],
-            "share_torch": False,
-            "share_cuda_ipc": False,
-            "package_manager": "conda",
-            "execution_model": "sealed_worker",
-            "conda_channels": ["conda-forge"],
-            "conda_dependencies": ["numpy"],
-            "sandbox": {"writable_paths": ["/fake/artifacts"]},
-        }
+        config = _make_config(
+            package_manager="conda",
+            execution_model="sealed_worker",
+            conda_channels=["conda-forge"],
+            conda_dependencies=["numpy"],
+            sandbox={"writable_paths": ["/fake/artifacts"]},
+        )
 
         ext = Extension.__new__(Extension)
         ext.name = "test_ext"
@@ -298,7 +284,7 @@ class TestCondaSealedWorkerBwrapDispatch:
                 patch("pyisolate._internal.host.build_extension_snapshot", return_value={}),
                 patch("os.chmod"),
             ):
-                ext._launch_with_uds()
+                cast(Any, ext)._launch_with_uds()
 
         mock_build_bwrap.assert_called_once()
         kwargs = mock_build_bwrap.call_args.kwargs
@@ -321,18 +307,13 @@ class TestEnvPropagation:
         from pyisolate._internal.host import Extension
         from pyisolate.shared import ExtensionBase
 
-        config = {
-            "name": "test_ext",
-            "module": "test_module",
-            "dependencies": [],
-            "share_torch": False,
-            "share_cuda_ipc": False,
-            "package_manager": "conda",
-            "execution_model": "sealed_worker",
-            "conda_channels": ["conda-forge"],
-            "conda_dependencies": ["boltons"],
-            "env": {"PYISOLATE_ARTIFACT_DIR": r"C:\artifacts"},
-        }
+        config = _make_config(
+            package_manager="conda",
+            execution_model="sealed_worker",
+            conda_channels=["conda-forge"],
+            conda_dependencies=["boltons"],
+            env={"PYISOLATE_ARTIFACT_DIR": r"C:\artifacts"},
+        )
 
         ext = Extension.__new__(Extension)
         ext.name = "test_ext"
@@ -373,7 +354,7 @@ class TestEnvPropagation:
             mock_socket.SOL_SOCKET = 1
             mock_socket.SO_REUSEADDR = 2
 
-            ext._launch_with_uds()
+            cast(Any, ext)._launch_with_uds()
 
         child_env = mock_popen.call_args.kwargs["env"]
         assert child_env["PYISOLATE_ARTIFACT_DIR"] == r"C:\artifacts"
@@ -396,16 +377,12 @@ class TestCondaCudaIpcForced:
         from pyisolate._internal.host import Extension
         from pyisolate.shared import ExtensionBase
 
-        config = {
-            "name": "test_ext",
-            "module": "test_module",
-            "dependencies": [],
-            "share_torch": False,
-            "share_cuda_ipc": True,  # Explicitly set, should be overridden
-            "package_manager": "conda",
-            "conda_channels": ["conda-forge"],
-            "conda_dependencies": ["numpy"],
-        }
+        config = _make_config(
+            share_cuda_ipc=True,
+            package_manager="conda",
+            conda_channels=["conda-forge"],
+            conda_dependencies=["numpy"],
+        )
 
         ext = Extension.__new__(Extension)
         ext.name = "test_ext"
@@ -416,7 +393,7 @@ class TestCondaCudaIpcForced:
         ext._cuda_ipc_enabled = True
 
         with patch.object(ext, "_launch_with_uds", return_value=MagicMock()):
-            ext._Extension__launch()
+            _call_private_launch(ext)
 
         # After __launch, cuda_ipc should be forced False
         assert ext._cuda_ipc_enabled is False

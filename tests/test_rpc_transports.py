@@ -5,11 +5,13 @@ headers without allocating multi-GB buffers. Real socketpair() used for
 roundtrip and connection-error tests.
 """
 
+import asyncio
 import contextlib
 import logging
 import socket
 import struct
-from collections.abc import Iterator
+from collections.abc import Callable, Coroutine, Iterator
+from typing import Any, cast
 from unittest.mock import patch
 
 import pytest
@@ -28,7 +30,7 @@ def _make_transport() -> JSONSocketTransport:
     return JSONSocketTransport(a)
 
 
-def _header_then_empty(msg_len: int):  # type: ignore[no-untyped-def]
+def _header_then_empty(msg_len: int) -> Any:  # type: ignore[no-untyped-def]
     """Return a _recvall side_effect: serve header bytes then empty (incomplete body)."""
     header = struct.pack(">I", msg_len & 0xFFFFFFFF)
     call_count = 0
@@ -72,6 +74,43 @@ class TestSendRecvRoundtrip:
         sender, _ = socket_pair
         payload = {"data": "x" * 1000}
         sender.send(payload)  # must not raise
+
+    def test_callable_roundtrip_executes_via_bound_rpc(
+        self, socket_pair: tuple[JSONSocketTransport, JSONSocketTransport]
+    ) -> None:
+        sender, receiver = socket_pair
+
+        class FakeRPC:
+            def __init__(self) -> None:
+                self.callbacks: dict[str, Callable[..., Any]] = {}
+                self.next_id = 0
+
+            def register_callback(self, func: Any) -> Any:  # type: ignore[no-untyped-def]
+                callback_id = f"cb-{self.next_id}"
+                self.next_id += 1
+                self.callbacks[callback_id] = func
+                return callback_id
+
+            async def call_callback(self, callback_id: str, *args: Any, **kwargs: Any) -> Any:  # type: ignore[no-untyped-def]
+                func = self.callbacks[callback_id]
+                result = func(*args, **kwargs)
+                if asyncio.iscoroutine(result):
+                    return await result
+                return result
+
+        sender_rpc = FakeRPC()
+        sender.bind_rpc(sender_rpc)
+        receiver.bind_rpc(sender_rpc)
+
+        def handler(payload: dict[str, int]) -> dict[str, int]:
+            return {"value": payload["value"] + 1}
+
+        sender.send({"handler": handler})
+        result = receiver.recv()
+
+        callback = cast(Callable[[dict[str, int]], Coroutine[Any, Any, dict[str, int]]], result["handler"])
+        callback_result: dict[str, int] = asyncio.run(callback({"value": 41}))
+        assert callback_result == {"value": 42}
 
 
 class TestRecvHardLimit:

@@ -8,7 +8,7 @@ from pyisolate._internal.host import normalize_extension_name, validate_dependen
 class TestSecurityValidation:
     """Test security validation functions."""
 
-    def test_normalize_extension_name_basic(self):
+    def test_normalize_extension_name_basic(self) -> None:
         """Test basic extension name normalization."""
         test_cases = [
             # (input, expected_output)
@@ -22,7 +22,7 @@ class TestSecurityValidation:
         for input_name, expected in test_cases:
             assert normalize_extension_name(input_name) == expected
 
-    def test_normalize_extension_name_with_spaces(self):
+    def test_normalize_extension_name_with_spaces(self) -> None:
         """Test that spaces are replaced with underscores."""
         test_cases = [
             ("my extension", "my_extension"),
@@ -36,7 +36,7 @@ class TestSecurityValidation:
         for input_name, expected in test_cases:
             assert normalize_extension_name(input_name) == expected
 
-    def test_normalize_extension_name_unicode(self):
+    def test_normalize_extension_name_unicode(self) -> None:
         """Test that Unicode characters are preserved."""
         test_cases = [
             ("扩展名", "扩展名"),  # Chinese
@@ -48,7 +48,7 @@ class TestSecurityValidation:
         for input_name, expected in test_cases:
             assert normalize_extension_name(input_name) == expected
 
-    def test_normalize_extension_name_dangerous_chars(self):
+    def test_normalize_extension_name_dangerous_chars(self) -> None:
         """Test that dangerous characters are replaced."""
         test_cases = [
             ("ext|pipe", "ext_pipe"),
@@ -71,7 +71,7 @@ class TestSecurityValidation:
         for input_name, expected in test_cases:
             assert normalize_extension_name(input_name) == expected
 
-    def test_normalize_extension_name_path_traversal(self):
+    def test_normalize_extension_name_path_traversal(self) -> None:
         """Test that path traversal attempts are neutralized."""
         test_cases = [
             ("../evil", "evil"),  # Dots at start removed
@@ -84,7 +84,7 @@ class TestSecurityValidation:
         for input_name, expected in test_cases:
             assert normalize_extension_name(input_name) == expected
 
-    def test_normalize_extension_name_edge_cases(self):
+    def test_normalize_extension_name_edge_cases(self) -> None:
         """Test edge cases in normalization."""
         # Empty name should raise
         with pytest.raises(ValueError, match="Extension name cannot be empty"):
@@ -101,7 +101,7 @@ class TestSecurityValidation:
         with pytest.raises(ValueError, match="contains only invalid characters"):
             normalize_extension_name("....")
 
-    def test_validate_dependency_valid(self):
+    def test_validate_dependency_valid(self) -> None:
         """Test that valid dependencies pass validation."""
         valid_deps = [
             "numpy",
@@ -117,7 +117,7 @@ class TestSecurityValidation:
         for dep in valid_deps:
             validate_dependency(dep)  # Should not raise
 
-    def test_validate_dependency_invalid(self):
+    def test_validate_dependency_invalid(self) -> None:
         """Test that invalid dependencies are rejected."""
         invalid_cases = [
             ("--extra-index-url", "cannot start with '-'"),
@@ -137,7 +137,7 @@ class TestSecurityValidation:
             with pytest.raises(ValueError, match=expected_msg):
                 validate_dependency(dep)
 
-    def test_dependency_injection_attempts(self):
+    def test_dependency_injection_attempts(self) -> None:
         """Test various dependency injection attempts are blocked."""
         # Test that we can't inject extra index URLs
         with pytest.raises(ValueError):
