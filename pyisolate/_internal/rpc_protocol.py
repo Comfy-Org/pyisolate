@@ -170,6 +170,32 @@ class AsyncRPC:
         self.outbox: queue.Queue[RPCPendingRequest | None] = queue.Queue()
         self._stopping: bool = False
 
+    @staticmethod
+    def _resolve_future_safely(
+        future: asyncio.Future[Any],
+        result: Any | None = None,
+        exc: BaseException | None = None,
+    ) -> None:
+        if future.done():
+            return
+        if exc is not None:
+            future.set_exception(exc)
+        else:
+            future.set_result(result)
+
+    def _schedule_future_resolution(
+        self,
+        loop: asyncio.AbstractEventLoop,
+        future: asyncio.Future[Any],
+        *,
+        result: Any | None = None,
+        exc: BaseException | None = None,
+    ) -> None:
+        if loop.is_closed():
+            return
+        with contextlib.suppress(RuntimeError):
+            loop.call_soon_threadsafe(self._resolve_future_safely, future, result, exc)
+
     def update_event_loop(self, loop: asyncio.AbstractEventLoop | None = None) -> None:
         """
         Update the default event loop used by this RPC instance.
@@ -284,6 +310,11 @@ class AsyncRPC:
         # Unblock the _send_thread
         self.outbox.put(None)
 
+        # Ask the peer to exit recv() cleanly before closing the socket locally.
+        if hasattr(self, "_transport"):
+            with contextlib.suppress(Exception):
+                self._transport.send(None)
+
         # Unblock the _recv_thread by closing the transport
         if hasattr(self, "_transport"):
             with contextlib.suppress(Exception):
@@ -293,7 +324,7 @@ class AsyncRPC:
         if self.blocking_future and not self.blocking_future.done():
             try:
                 loop = self._get_valid_loop(self.default_loop)
-                loop.call_soon_threadsafe(self.blocking_future.set_result, None)
+                self._schedule_future_resolution(loop, self.blocking_future, result=None)
             except (RuntimeError, Exception):
                 pass
 
@@ -458,17 +489,17 @@ class AsyncRPC:
                     for item in pending_items:
                         fut = item["future"]
                         calling_loop = item["calling_loop"]
-                        if not calling_loop.is_closed():
-                            with contextlib.suppress(RuntimeError):
-                                calling_loop.call_soon_threadsafe(
-                                    fut.set_exception, ConnectionError(error_msg)
-                                )
+                        self._schedule_future_resolution(
+                            calling_loop,
+                            fut,
+                            exc=ConnectionError(error_msg),
+                        )
 
                     # Resolve blocking_future to unblock run_until_stopped
                     if self.blocking_future and not self.blocking_future.done():
                         try:
                             loop = self._get_valid_loop(self.default_loop)
-                            loop.call_soon_threadsafe(self.blocking_future.set_result, None)
+                            self._schedule_future_resolution(loop, self.blocking_future, result=None)
                         except RuntimeError:
                             pass
                     break
@@ -477,7 +508,7 @@ class AsyncRPC:
                     if self.blocking_future:
                         try:
                             loop = self._get_valid_loop(self.default_loop)
-                            loop.call_soon_threadsafe(self.blocking_future.set_result, None)
+                            self._schedule_future_resolution(loop, self.blocking_future, result=None)
                         except RuntimeError:
                             pass  # Loop closed, blocking_future won't be awaited anyway
                     break
@@ -501,12 +532,16 @@ class AsyncRPC:
 
                         try:
                             if item.get("error"):
-                                calling_loop.call_soon_threadsafe(
-                                    pending_request["future"].set_exception, Exception(item["error"])
+                                self._schedule_future_resolution(
+                                    calling_loop,
+                                    pending_request["future"],
+                                    exc=Exception(item["error"]),
                                 )
                             else:
-                                calling_loop.call_soon_threadsafe(
-                                    pending_request["future"].set_result, item["result"]
+                                self._schedule_future_resolution(
+                                    calling_loop,
+                                    pending_request["future"],
+                                    result=item["result"],
                                 )
 
                         except RuntimeError as e:
@@ -606,11 +641,11 @@ class AsyncRPC:
                             pending = self.pending.pop(call_id, None)
                         if pending:
                             calling_loop = pending["calling_loop"]
-                            if not calling_loop.is_closed():
-                                with contextlib.suppress(RuntimeError):
-                                    calling_loop.call_soon_threadsafe(
-                                        pending["future"].set_exception, RuntimeError(str(exc))
-                                    )
+                            self._schedule_future_resolution(
+                                calling_loop,
+                                pending["future"],
+                                exc=RuntimeError(str(exc)),
+                            )
                         # Don't raise, just log, so thread stays alive
                         logger.error(f"RPC Send Failed: {exc}")
 
@@ -639,11 +674,11 @@ class AsyncRPC:
                             pending = self.pending.pop(call_id, None)
                         if pending:
                             calling_loop = pending["calling_loop"]
-                            if not calling_loop.is_closed():
-                                with contextlib.suppress(RuntimeError):
-                                    calling_loop.call_soon_threadsafe(
-                                        pending["future"].set_exception, RuntimeError(str(exc))
-                                    )
+                            self._schedule_future_resolution(
+                                calling_loop,
+                                pending["future"],
+                                exc=RuntimeError(str(exc)),
+                            )
                         logger.error(f"RPC Callback Send Failed: {exc}")
 
                 elif typed_item["kind"] == "response":

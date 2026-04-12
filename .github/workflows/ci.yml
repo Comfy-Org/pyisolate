@@ -119,13 +119,22 @@ jobs:
         source .venv/bin/activate
         uv pip install -e ".[dev,test]"
 
-    - name: Run ruff
+    - name: Run ruff check
       run: |
         source .venv/bin/activate
         ruff check pyisolate tests
+
+    - name: Run ruff format check
+      run: |
+        source .venv/bin/activate
         ruff format --check pyisolate tests
 
     - name: Run mypy
       run: |
         source .venv/bin/activate
-        mypy pyisolate
+        mypy pyisolate tests
+
+    - name: Run pytest
+      run: |
+        source .venv/bin/activate
+        pytest -q

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from typing import Any
 from unittest.mock import patch
 
 import pytest
@@ -9,7 +10,7 @@ import pytest
 from pyisolate._internal.environment import validate_backend_config
 
 
-def _make_config(**overrides):
+def _make_config(**overrides: Any) -> Any:
     """Build a minimal ExtensionConfig dict with conda defaults."""
     base = {
         "name": "test_ext",
@@ -29,7 +30,7 @@ def _make_config(**overrides):
 
 
 class TestDefaultPackageManager:
-    def test_default_package_manager_is_uv(self):
+    def test_default_package_manager_is_uv(self) -> None:
         """Config without package_manager should default to 'uv' and pass validation."""
         config = _make_config()
         del config["package_manager"]
@@ -38,7 +39,7 @@ class TestDefaultPackageManager:
 
 
 class TestCondaShareTorchRaises:
-    def test_conda_share_torch_raises(self):
+    def test_conda_share_torch_raises(self) -> None:
         """conda + share_torch=True must raise ValueError."""
         config = _make_config(
             package_manager="conda",
@@ -51,7 +52,7 @@ class TestCondaShareTorchRaises:
 
 class TestCondaCudaWheelsAllowed:
     @patch("shutil.which", return_value="/usr/bin/pixi")
-    def test_conda_cuda_wheels_allowed(self, _mock_which):
+    def test_conda_cuda_wheels_allowed(self, _mock_which: Any) -> None:
         """conda + cuda_wheels is valid — pixi resolves via [pypi-options]."""
         config = _make_config(
             package_manager="conda",
@@ -63,7 +64,7 @@ class TestCondaCudaWheelsAllowed:
 
 
 class TestCondaMissingChannelsRaises:
-    def test_conda_missing_channels_raises(self):
+    def test_conda_missing_channels_raises(self) -> None:
         """conda + empty/missing conda_channels must raise ValueError."""
         config = _make_config(
             package_manager="conda",
@@ -71,7 +72,7 @@ class TestCondaMissingChannelsRaises:
         with pytest.raises(ValueError, match="conda_channels"):
             validate_backend_config(config)
 
-    def test_conda_empty_channels_raises(self):
+    def test_conda_empty_channels_raises(self) -> None:
         """conda + empty conda_channels list must raise ValueError."""
         config = _make_config(
             package_manager="conda",
@@ -82,20 +83,25 @@ class TestCondaMissingChannelsRaises:
 
 
 class TestCondaMissingPixiRaises:
-    @patch("shutil.which", return_value=None)
-    def test_conda_missing_pixi_raises(self, mock_which):
-        """conda + pixi not on PATH must raise ValueError."""
+    @patch(
+        "pyisolate._internal.pixi_provisioner.ensure_pixi",
+        side_effect=RuntimeError("pixi bootstrap failed"),
+    )
+    def test_conda_missing_pixi_raises(self, mock_ensure_pixi: Any) -> None:
+        """conda + failed pixi bootstrap must raise ValueError."""
         config = _make_config(
             package_manager="conda",
             conda_channels=["conda-forge"],
         )
-        with pytest.raises(ValueError, match="pixi is required"):
+        with pytest.raises(
+            ValueError, match="pixi is required for conda backend but could not be provisioned"
+        ):
             validate_backend_config(config)
 
 
 class TestCondaValidConfigPasses:
     @patch("shutil.which", return_value="/usr/bin/pixi")
-    def test_conda_valid_config_passes(self, mock_which):
+    def test_conda_valid_config_passes(self, mock_which: Any) -> None:
         """Valid conda config must pass validation without error."""
         config = _make_config(
             package_manager="conda",
@@ -106,7 +112,7 @@ class TestCondaValidConfigPasses:
         validate_backend_config(config)
 
     @patch("shutil.which", return_value="/usr/bin/pixi")
-    def test_conda_with_platforms_passes(self, mock_which):
+    def test_conda_with_platforms_passes(self, mock_which: Any) -> None:
         """Valid conda config with platforms must pass."""
         config = _make_config(
             package_manager="conda",

@@ -54,20 +54,24 @@ def _cache_dir(version: str) -> Path:
 
 def _fetch_url(url: str) -> bytes:
     """Download a URL using urllib (stdlib, no extra deps)."""
-    import urllib.request
     import urllib.error
+    import urllib.request
 
-    req = urllib.request.Request(url, headers={"User-Agent": "pyisolate"})
-    with urllib.request.urlopen(req, timeout=120) as resp:
-        return resp.read()
+    if not url.startswith("https://"):
+        raise RuntimeError(f"Unsupported pixi download URL scheme: {url}")
+
+    req = urllib.request.Request(url, headers={"User-Agent": "pyisolate"})  # noqa: S310
+    with urllib.request.urlopen(req, timeout=120) as resp:  # noqa: S310
+        data = resp.read()
+        if not isinstance(data, bytes):
+            raise RuntimeError(f"Unexpected pixi download payload type: {type(data).__name__}")
+        return data
 
 
 def _verify_checksum(data: bytes, expected_hex: str) -> None:
     actual = hashlib.sha256(data).hexdigest()
     if actual != expected_hex:
-        raise RuntimeError(
-            f"pixi binary checksum mismatch: expected {expected_hex}, got {actual}"
-        )
+        raise RuntimeError(f"pixi binary checksum mismatch: expected {expected_hex}, got {actual}")
 
 
 def ensure_pixi(version: str | None = None) -> str:
@@ -83,9 +87,7 @@ def ensure_pixi(version: str | None = None) -> str:
     existing = shutil.which("pixi")
     if existing:
         try:
-            result = subprocess.run(
-                [existing, "--version"], capture_output=True, text=True, timeout=10
-            )
+            result = subprocess.run([existing, "--version"], capture_output=True, text=True, timeout=10)
             if result.returncode == 0 and version in result.stdout:
                 return existing
         except (subprocess.TimeoutExpired, OSError):

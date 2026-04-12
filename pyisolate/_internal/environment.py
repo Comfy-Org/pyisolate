@@ -94,12 +94,11 @@ def validate_backend_config(config: ExtensionConfig) -> None:
 
     # conda requires pixi — auto-provision if not on PATH
     from pyisolate._internal.pixi_provisioner import ensure_pixi
+
     try:
         ensure_pixi()
     except Exception as e:
-        raise ValueError(
-            f"pixi is required for conda backend but could not be provisioned: {e}"
-        ) from e
+        raise ValueError(f"pixi is required for conda backend but could not be provisioned: {e}") from e
 
 
 logger = logging.getLogger(__name__)
@@ -554,14 +553,15 @@ def install_dependencies(venv_path: Path, config: ExtensionConfig, name: str) ->
         regular_targets: list[str] = []
         share_torch_no_deps_targets: list[str] = []
         cuda_wheel_targets: list[str] = []
-        share_torch_no_deps_names = {
-            canonicalize_name(dep_name) for dep_name in config.get("share_torch_no_deps", [])
-        }
+        share_torch_no_deps = config.get("share_torch_no_deps", [])
+        if not isinstance(share_torch_no_deps, list):
+            share_torch_no_deps = []
+        share_torch_no_deps_names = {canonicalize_name(dep_name) for dep_name in share_torch_no_deps}
         for target in install_targets:
             if "://" not in target:
                 if config["share_torch"]:
                     try:
-                        target_name = canonicalize_name(Requirement(target).name)
+                        target_name: str = canonicalize_name(Requirement(target).name)
                     except InvalidRequirement:
                         target_name = ""
                     if target_name and target_name in share_torch_no_deps_names:

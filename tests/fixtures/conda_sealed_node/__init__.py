@@ -54,7 +54,7 @@ class OpenWeatherDatasetNode:
         return {"required": {}}
 
     def open_dataset(self) -> tuple[float, str]:
-        from boltons import strutils
+        from boltons import strutils  # type: ignore[import-untyped]
         from packaging.version import Version
 
         artifact_dir = Path(os.environ["PYISOLATE_ARTIFACT_DIR"])

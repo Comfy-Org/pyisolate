@@ -8,7 +8,7 @@ from pyisolate.host import ExtensionManager
 
 class FakeExtension:
     @classmethod
-    def __class_getitem__(cls, item):
+    def __class_getitem__(cls, item: Any) -> Any:
         return cls
 
     def __init__(
@@ -28,23 +28,23 @@ class FakeExtension:
         self.started += 1
         self._process_initialized = True
 
-    def get_proxy(self):
+    def get_proxy(self) -> Any:
         return self.proxy_obj
 
-    def stop(self):
+    def stop(self) -> None:
         self.stopped += 1
 
 
 @pytest.fixture(autouse=True)
-def patch_extension(monkeypatch):
+def patch_extension(monkeypatch: Any) -> None:
     monkeypatch.setattr("pyisolate.host.Extension", FakeExtension)
 
 
-def make_manager(tmp_path):
+def make_manager(tmp_path: Any) -> Any:
     return ExtensionManager(types.SimpleNamespace, {"venv_root_path": str(tmp_path)})
 
 
-def base_config(tmp_path):
+def base_config(tmp_path: Any) -> Any:
     return {
         "name": "demo",
         "module_path": "/tmp/mod.py",
@@ -56,7 +56,7 @@ def base_config(tmp_path):
     }
 
 
-def test_load_extension_returns_host_extension(monkeypatch, tmp_path):
+def test_load_extension_returns_host_extension(monkeypatch: Any, tmp_path: Any) -> None:
     mgr = make_manager(tmp_path)
     proxy = mgr.load_extension(base_config(tmp_path))
     # First access triggers start + rpc init + proxy creation
@@ -69,7 +69,7 @@ def test_load_extension_returns_host_extension(monkeypatch, tmp_path):
     assert ext.started == 1
 
 
-def test_duplicate_extension_name_raises(tmp_path):
+def test_duplicate_extension_name_raises(tmp_path: Any) -> None:
     mgr = make_manager(tmp_path)
     cfg = base_config(tmp_path)
     mgr.load_extension(cfg)
@@ -77,7 +77,7 @@ def test_duplicate_extension_name_raises(tmp_path):
         mgr.load_extension(cfg)
 
 
-def test_host_extension_getattr_delegates(monkeypatch, tmp_path):
+def test_host_extension_getattr_delegates(monkeypatch: Any, tmp_path: Any) -> None:
     mgr = make_manager(tmp_path)
     cfg = base_config(tmp_path)
     proxy = mgr.load_extension(cfg)
@@ -89,7 +89,7 @@ def test_host_extension_getattr_delegates(monkeypatch, tmp_path):
     assert proxy.run() == "ok"
 
 
-def test_stop_all_extensions_calls_stop(tmp_path):
+def test_stop_all_extensions_calls_stop(tmp_path: Any) -> None:
     mgr = make_manager(tmp_path)
     cfg = base_config(tmp_path)
     mgr.load_extension(cfg)
@@ -98,13 +98,13 @@ def test_stop_all_extensions_calls_stop(tmp_path):
     assert mgr.extensions == {}
 
 
-def test_stop_all_extensions_logs_error(caplog, tmp_path):
+def test_stop_all_extensions_logs_error(caplog: Any, tmp_path: Any) -> None:
     mgr = make_manager(tmp_path)
     cfg = base_config(tmp_path)
     _proxy = mgr.load_extension(cfg)  # noqa: F841 - load to register extension
     ext = mgr.extensions["demo"]
 
-    def boom():
+    def boom() -> None:
         raise RuntimeError("boom")
 
     ext.stop = boom  # type: ignore[assignment]
