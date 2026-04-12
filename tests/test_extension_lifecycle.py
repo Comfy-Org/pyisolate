@@ -21,7 +21,7 @@ from pyisolate.config import ExtensionConfig
 class TestExtensionConfig:
     """Tests for ExtensionConfig TypedDict."""
 
-    def test_config_requires_name(self):
+    def test_config_requires_name(self) -> None:
         """ExtensionConfig must have a name."""
         config: ExtensionConfig = {
             "name": "test_ext",
@@ -34,7 +34,7 @@ class TestExtensionConfig:
         }
         assert config["name"] == "test_ext"
 
-    def test_config_requires_module_path(self):
+    def test_config_requires_module_path(self) -> None:
         """ExtensionConfig must have a module_path."""
         config: ExtensionConfig = {
             "name": "test_ext",
@@ -47,7 +47,7 @@ class TestExtensionConfig:
         }
         assert config["module_path"] == "/path/to/ext"
 
-    def test_config_with_dependencies(self):
+    def test_config_with_dependencies(self) -> None:
         """ExtensionConfig accepts dependencies list."""
         config: ExtensionConfig = {
             "name": "test_ext",
@@ -61,7 +61,7 @@ class TestExtensionConfig:
         assert "numpy>=1.20" in config["dependencies"]
         assert "pillow" in config["dependencies"]
 
-    def test_config_share_torch(self):
+    def test_config_share_torch(self) -> None:
         """ExtensionConfig accepts share_torch flag."""
         config: ExtensionConfig = {
             "name": "test_ext",
@@ -78,7 +78,7 @@ class TestExtensionConfig:
 class TestExtensionVenvPath:
     """Tests for extension venv path computation."""
 
-    def test_venv_path_includes_extension_name(self):
+    def test_venv_path_includes_extension_name(self) -> None:
         """Venv path should include extension name for isolation."""
         # This tests the contract, not implementation
         config: ExtensionConfig = {
@@ -98,7 +98,7 @@ class TestExtensionVenvPath:
 class TestExtensionManifest:
     """Tests for extension manifest (pyisolate.yaml) parsing."""
 
-    def test_manifest_from_yaml(self, tmp_path: Path):
+    def test_manifest_from_yaml(self, tmp_path: Path) -> None:
         """Extension can be configured via YAML manifest."""
         manifest_content = """
 isolated: true
@@ -111,7 +111,7 @@ dependencies:
         manifest_path.write_text(manifest_content)
 
         # Parse manifest
-        import yaml
+        import yaml  # type: ignore[import-untyped]
 
         with open(manifest_path) as f:
             manifest = yaml.safe_load(f)
@@ -120,7 +120,7 @@ dependencies:
         assert manifest["share_torch"] is True
         assert "numpy>=1.20" in manifest["dependencies"]
 
-    def test_manifest_defaults_isolated_true(self, tmp_path: Path):
+    def test_manifest_defaults_isolated_true(self, tmp_path: Path) -> None:
         """Missing 'isolated' defaults to True."""
         manifest_content = """
 dependencies: []
@@ -128,7 +128,7 @@ dependencies: []
         manifest_path = tmp_path / "pyisolate.yaml"
         manifest_path.write_text(manifest_content)
 
-        import yaml
+        import yaml  # type: ignore[import-untyped]
 
         with open(manifest_path) as f:
             manifest = yaml.safe_load(f)
@@ -154,7 +154,7 @@ class TestExtensionLifecycleContract:
     Extension class must fulfill.
     """
 
-    def test_extension_requires_config(self):
+    def test_extension_requires_config(self) -> None:
         """Extension must be created with a config."""
         config: ExtensionConfig = {
             "name": "test_ext",
@@ -168,7 +168,7 @@ class TestExtensionLifecycleContract:
         # Contract: Extension accepts config in constructor
         assert config["name"] == "test_ext"
 
-    def test_extension_lifecycle_phases(self):
+    def test_extension_lifecycle_phases(self) -> None:
         """Document the extension lifecycle phases."""
         # Phase 1: Configuration
         # - ExtensionConfig created from manifest or programmatically
@@ -195,7 +195,7 @@ class TestExtensionLifecycleContract:
         phases = ["config", "venv", "launch", "execute", "shutdown"]
         assert len(phases) == 5
 
-    def test_extension_stop_is_idempotent(self):
+    def test_extension_stop_is_idempotent(self) -> None:
         """Stopping an already-stopped extension should not error."""
         # Contract: calling stop() multiple times is safe
         # This is tested at contract level, not implementation
@@ -204,7 +204,7 @@ class TestExtensionLifecycleContract:
 class TestDependencyValidation:
     """Tests for dependency validation."""
 
-    def test_valid_dependency_format(self):
+    def test_valid_dependency_format(self) -> None:
         """Dependencies should be pip-installable strings."""
         valid_deps = [
             "numpy",
@@ -226,7 +226,7 @@ class TestDependencyValidation:
 
         assert config["dependencies"] == valid_deps
 
-    def test_empty_dependencies_allowed(self):
+    def test_empty_dependencies_allowed(self) -> None:
         """Extensions with no dependencies are valid."""
         config: ExtensionConfig = {
             "name": "test",

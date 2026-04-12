@@ -74,7 +74,7 @@ class TestBuildChildSysPath:
     def test_preserves_host_order(self) -> None:
         """Host paths must appear in original order."""
         host = ["/host/lib1", "/host/lib2", "/host/lib3"]
-        extras = ["/venv/lib"]
+        extras: list[str] = ["/venv/lib"]
 
         result = build_child_sys_path(host, extras)
 
@@ -132,7 +132,7 @@ class TestBuildChildSysPath:
         """When filtered_subdirs is None, no subdirectory filtering is applied."""
         root = "/myapp/root"
         host = [f"{root}/utils", f"{root}/app", "/host/lib"]
-        extras = []
+        extras: list[str] = []
 
         result = build_child_sys_path(host, extras, root, filtered_subdirs=None)
 
@@ -146,7 +146,7 @@ class TestBuildChildSysPath:
         root = "/myapp/root"
         venv_site = f"{root}/.venv/lib/python3.12/site-packages"
         host = [f"{root}/comfy", venv_site, "/host/lib"]
-        extras = []
+        extras: list[str] = []
 
         result = build_child_sys_path(host, extras, root, filtered_subdirs=["comfy"])
 
@@ -166,7 +166,7 @@ class TestBuildChildSysPath:
 
     def test_handles_empty_host_paths(self) -> None:
         """Should work with empty host paths (edge case)."""
-        host = []
+        host: list[str] = []
         extras = ["/venv/lib"]
 
         result = build_child_sys_path(host, extras)
@@ -176,7 +176,7 @@ class TestBuildChildSysPath:
     def test_handles_empty_extra_paths(self) -> None:
         """Should work with empty extra paths."""
         host = ["/host/lib"]
-        extras = []
+        extras: list[str] = []
 
         result = build_child_sys_path(host, extras)
 
@@ -187,7 +187,7 @@ class TestBuildChildSysPath:
         # This test assumes case-insensitive filesystem (Windows-like)
         # On Linux it may not dedupe, which is correct behavior
         host = ["/Host/Lib", "/host/lib"]  # Different case
-        extras = []
+        extras: list[str] = []
 
         result = build_child_sys_path(host, extras)
 

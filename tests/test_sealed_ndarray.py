@@ -10,7 +10,7 @@ from pyisolate.sealed import SealedNodeExtension
 
 
 class TestSealedNdarrayTransport:
-    def test_ndarray_registered_as_data_type(self):
+    def test_ndarray_registered_as_data_type(self) -> None:
         """After SealedNodeExtension init, ndarray is a registered data_type."""
         with singleton_scope():
             SealedNodeExtension()
@@ -18,12 +18,13 @@ class TestSealedNdarrayTransport:
             assert registry.has_handler("ndarray")
             assert registry.is_data_type("ndarray")
 
-    def test_ndarray_serializes_as_tensor_value(self):
+    def test_ndarray_serializes_as_tensor_value(self) -> None:
         """ndarray serializer produces TensorValue dict, not RemoteObjectHandle."""
         with singleton_scope():
             SealedNodeExtension()
             registry = SerializerRegistry.get_instance()
             serializer = registry.get_serializer("ndarray")
+            assert serializer is not None
 
             arr = np.random.rand(1, 64, 64, 3).astype(np.float32)
             result = serializer(arr)
@@ -36,7 +37,7 @@ class TestSealedNdarrayTransport:
             assert isinstance(result["data"], list)
             print(f"RESULT_TYPE={result['__type__']}")
 
-    def test_wrap_for_transport_passes_ndarray_inline(self):
+    def test_wrap_for_transport_passes_ndarray_inline(self) -> None:
         """_wrap_for_transport does NOT wrap ndarray as RemoteObjectHandle."""
         with singleton_scope():
             ext = SealedNodeExtension()
@@ -45,6 +46,7 @@ class TestSealedNdarrayTransport:
 
             # Should NOT be RemoteObjectHandle
             from pyisolate._internal.remote_handle import RemoteObjectHandle
+
             assert not isinstance(wrapped, RemoteObjectHandle)
             # Should still be ndarray (serializer runs at JSON encode time, not at wrap time)
             assert isinstance(wrapped, np.ndarray)

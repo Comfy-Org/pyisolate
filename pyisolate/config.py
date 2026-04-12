@@ -65,8 +65,11 @@ class ExtensionConfig(TypedDict):
     name: str
     """Unique name for the extension (used for venv directory naming)."""
 
-    module_path: str
+    module_path: NotRequired[str]
     """Filesystem path to the extension package containing ``__init__.py``."""
+
+    module: NotRequired[str]
+    """Legacy module identifier used by some sealed/conda manifests and tests."""
 
     isolated: bool
     """Whether to run the extension in an isolated venv versus the host process."""
@@ -83,14 +86,14 @@ class ExtensionConfig(TypedDict):
     share_cuda_ipc: bool
     """If True, attempt CUDA IPC-based tensor transport (Linux only, requires ``share_torch``)."""
 
-    sandbox: dict[str, Any]
+    sandbox: NotRequired[dict[str, Any]]
     """Configuration for the sandbox (e.g. writable_paths, network access)."""
 
-    sandbox_mode: SandboxMode
+    sandbox_mode: NotRequired[SandboxMode]
     """Sandbox enforcement mode. Default is REQUIRED (fail if bwrap unavailable).
     Set to DISABLED only if you fully trust all code and accept the security risk."""
 
-    env: dict[str, str]
+    env: NotRequired[dict[str, str]]
     """Environment variable overrides for the child process."""
 
     package_manager: NotRequired[str]

@@ -1,10 +1,11 @@
 from types import SimpleNamespace
+from typing import Any
 
 from pyisolate._internal import torch_utils
 
 
-def test_get_torch_ecosystem_packages_includes_distributions(monkeypatch):
-    def fake_distributions():
+def test_get_torch_ecosystem_packages_includes_distributions(monkeypatch: Any) -> Any:
+    def fake_distributions() -> Any:
         meta = SimpleNamespace(metadata={"Name": "nvidia-cublas"})
         meta2 = SimpleNamespace(metadata={"Name": "torch-hub"})
         return [meta, meta2]
@@ -16,8 +17,8 @@ def test_get_torch_ecosystem_packages_includes_distributions(monkeypatch):
     assert "torch-hub" in pkgs
 
 
-def test_get_torch_ecosystem_packages_handles_exception(monkeypatch):
-    def bad_distributions():
+def test_get_torch_ecosystem_packages_handles_exception(monkeypatch: Any) -> None:
+    def bad_distributions() -> None:
         raise RuntimeError("boom")
 
     torch_utils.get_torch_ecosystem_packages.cache_clear()

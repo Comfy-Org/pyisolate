@@ -71,9 +71,7 @@ def _fetch_url(url: str) -> bytes:
 def _verify_checksum(data: bytes, expected_hex: str) -> None:
     actual = hashlib.sha256(data).hexdigest()
     if actual != expected_hex:
-        raise RuntimeError(
-            f"pixi binary checksum mismatch: expected {expected_hex}, got {actual}"
-        )
+        raise RuntimeError(f"pixi binary checksum mismatch: expected {expected_hex}, got {actual}")
 
 
 def ensure_pixi(version: str | None = None) -> str:
@@ -89,9 +87,7 @@ def ensure_pixi(version: str | None = None) -> str:
     existing = shutil.which("pixi")
     if existing:
         try:
-            result = subprocess.run(
-                [existing, "--version"], capture_output=True, text=True, timeout=10
-            )
+            result = subprocess.run([existing, "--version"], capture_output=True, text=True, timeout=10)
             if result.returncode == 0 and version in result.stdout:
                 return existing
         except (subprocess.TimeoutExpired, OSError):

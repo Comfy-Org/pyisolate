@@ -17,7 +17,7 @@ from pyisolate._internal.rpc_serialization import (
 class TestPrepareForRpc:
     """Tests for _prepare_for_rpc serialization."""
 
-    def test_primitives_pass_through(self):
+    def test_primitives_pass_through(self) -> None:
         """Primitive types pass through unchanged."""
         assert _prepare_for_rpc(42) == 42
         assert _prepare_for_rpc("hello") == "hello"
@@ -25,45 +25,45 @@ class TestPrepareForRpc:
         assert _prepare_for_rpc(True) is True
         assert _prepare_for_rpc(None) is None
 
-    def test_list_preserved(self):
+    def test_list_preserved(self) -> None:
         """Lists are preserved."""
         data = [1, 2, 3]
         result = _prepare_for_rpc(data)
         assert result == [1, 2, 3]
 
-    def test_nested_list(self):
+    def test_nested_list(self) -> None:
         """Nested lists are handled."""
         data = [[1, 2], [3, 4]]
         result = _prepare_for_rpc(data)
         assert result == [[1, 2], [3, 4]]
 
-    def test_dict_preserved(self):
+    def test_dict_preserved(self) -> None:
         """Dicts are preserved."""
         data = {"a": 1, "b": 2}
         result = _prepare_for_rpc(data)
         assert result == {"a": 1, "b": 2}
 
-    def test_nested_dict(self):
+    def test_nested_dict(self) -> None:
         """Nested dicts are handled."""
         data = {"outer": {"inner": 42}}
         result = _prepare_for_rpc(data)
         assert result == {"outer": {"inner": 42}}
 
-    def test_tuple_preserved(self):
+    def test_tuple_preserved(self) -> None:
         """Tuples are preserved (JSON converts to list on transport)."""
         data = (1, 2, 3)
         result = _prepare_for_rpc(data)
         # Implementation preserves tuples; JSON transport converts to list
         assert result == (1, 2, 3) or result == [1, 2, 3]
 
-    def test_attrdict_converted(self):
+    def test_attrdict_converted(self) -> None:
         """AttrDict is converted to plain dict."""
         data = AttrDict({"key": "value"})
         result = _prepare_for_rpc(data)
         assert isinstance(result, dict)
         assert result["key"] == "value"
 
-    def test_attribute_container_handled(self):
+    def test_attribute_container_handled(self) -> None:
         """AttributeContainer is handled appropriately."""
         data = AttributeContainer({"a": 1, "b": 2})
         result = _prepare_for_rpc(data)
@@ -73,7 +73,7 @@ class TestPrepareForRpc:
         else:
             assert hasattr(result, "_data")
 
-    def test_mixed_nested_structure(self):
+    def test_mixed_nested_structure(self) -> None:
         """Mixed nested structures are handled."""
         data = {
             "list": [1, 2, {"nested": True}],
@@ -91,40 +91,40 @@ class TestPrepareForRpc:
 class TestAttrDictBehavior:
     """Tests for AttrDict helper class behavior."""
 
-    def test_attribute_access(self):
+    def test_attribute_access(self) -> None:
         """AttrDict allows attribute-style access."""
         ad = AttrDict({"name": "test", "value": 42})
 
         assert ad.name == "test"
         assert ad.value == 42
 
-    def test_dict_access(self):
+    def test_dict_access(self) -> None:
         """AttrDict allows dict-style access."""
         ad = AttrDict({"name": "test"})
 
         assert ad["name"] == "test"
 
-    def test_nested_dict_access(self):
+    def test_nested_dict_access(self) -> None:
         """Nested dicts accessible via attribute."""
         ad = AttrDict({"outer": {"inner": "value"}})
 
         assert ad.outer["inner"] == "value"
 
-    def test_missing_attribute_raises(self):
+    def test_missing_attribute_raises(self) -> None:
         """Missing attributes raise AttributeError."""
         ad = AttrDict({"existing": True})
 
         with pytest.raises(AttributeError):
             _ = ad.missing
 
-    def test_missing_key_raises(self):
+    def test_missing_key_raises(self) -> None:
         """Missing keys raise KeyError."""
         ad = AttrDict({"existing": True})
 
         with pytest.raises(KeyError):
             _ = ad["missing"]
 
-    def test_iteration(self):
+    def test_iteration(self) -> None:
         """AttrDict can be iterated."""
         ad = AttrDict({"a": 1, "b": 2})
 
@@ -136,21 +136,21 @@ class TestAttrDictBehavior:
 class TestAttributeContainerBehavior:
     """Tests for AttributeContainer helper class behavior."""
 
-    def test_attribute_access(self):
+    def test_attribute_access(self) -> None:
         """AttributeContainer wraps dict with attribute access."""
         container = AttributeContainer({"x": 10, "y": 20})
 
         assert container.x == 10
         assert container.y == 20
 
-    def test_data_property(self):
+    def test_data_property(self) -> None:
         """_data property returns underlying dict."""
         data = {"key": "value"}
         container = AttributeContainer(data)
 
         assert container._data == data
 
-    def test_missing_attribute_raises(self):
+    def test_missing_attribute_raises(self) -> None:
         """Missing attributes raise AttributeError."""
         container = AttributeContainer({"existing": True})
 
@@ -161,11 +161,11 @@ class TestAttributeContainerBehavior:
 class TestSingletonMetaclass:
     """Tests for SingletonMetaclass behavior."""
 
-    def test_singleton_same_instance(self):
+    def test_singleton_same_instance(self) -> None:
         """Multiple instantiations return same instance."""
 
         class MySingleton(ProxiedSingleton):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.value = 42
 
@@ -174,13 +174,13 @@ class TestSingletonMetaclass:
 
         assert a is b
 
-    def test_singleton_state_shared(self):
+    def test_singleton_state_shared(self) -> None:
         """State is shared across references."""
 
         class StatefulSingleton(ProxiedSingleton):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
-                self.data = []
+                self.data: list[str] = []
 
         a = StatefulSingleton()
         a.data.append("from_a")
@@ -188,7 +188,7 @@ class TestSingletonMetaclass:
         b = StatefulSingleton()
         assert "from_a" in b.data
 
-    def test_different_singletons_independent(self):
+    def test_different_singletons_independent(self) -> None:
         """Different singleton classes are independent."""
 
         class SingletonA(ProxiedSingleton):

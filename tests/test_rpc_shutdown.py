@@ -1,6 +1,7 @@
 """Tests for RPC graceful shutdown behavior."""
 
 import asyncio
+from typing import Any
 from unittest.mock import Mock
 
 import pytest
@@ -12,17 +13,17 @@ from pyisolate._internal.rpc_transports import RPCTransport
 class MockTransport(RPCTransport):
     """Mock transport that blocks on recv until closed."""
 
-    def __init__(self):
-        self.recv_future = asyncio.Future()
-        self.sent_messages = []
+    def __init__(self) -> None:
+        self.recv_future: asyncio.Future[Any] = asyncio.Future()
+        self.sent_messages: list[Any] = []
         self.closed = False
 
-    def send(self, obj):
+    def send(self, obj: Any) -> None:
         if self.closed:
             raise RuntimeError("Transport closed")
         self.sent_messages.append(obj)
 
-    def recv(self):
+    def recv(self) -> Any:
         """Simulate blocking recv."""
         if self.closed:
             raise ConnectionError("Connection closed")
@@ -30,21 +31,21 @@ class MockTransport(RPCTransport):
         # return a value or raise based on state
         return None  # Returning None signals end of stream in our loop
 
-    def close(self):
+    def close(self) -> None:
         self.closed = True
 
 
 class BlockingMockTransport(RPCTransport):
     """Transport that allows controlling recv blocking."""
 
-    def __init__(self):
-        self.recv_queue = asyncio.Queue()
+    def __init__(self) -> None:
+        self.recv_queue: asyncio.Queue[Any] = asyncio.Queue()
         self.closed = False
 
-    def send(self, obj):
+    def send(self, obj: Any) -> None:
         pass
 
-    def recv(self):
+    def recv(self) -> None:
         # This will be called in a thread
         if self.closed:
             raise ConnectionError("Closed")
@@ -60,12 +61,12 @@ class BlockingMockTransport(RPCTransport):
             time.sleep(0.01)
         raise ConnectionError("Closed during block")
 
-    def close(self):
+    def close(self) -> None:
         self.closed = True
 
 
 @pytest.mark.asyncio
-async def test_shutdown_sets_flag():
+async def test_shutdown_sets_flag() -> None:
     """Test that shutdown() sets the stopping flag."""
     rpc = AsyncRPC(transport=MockTransport())
     assert not rpc._stopping
@@ -74,7 +75,7 @@ async def test_shutdown_sets_flag():
 
 
 @pytest.mark.asyncio
-async def test_shutdown_suppresses_connection_error_logs(caplog):
+async def test_shutdown_suppresses_connection_error_logs(caplog: Any) -> None:
     """Test that connection errors are logged as debug, not error, during shutdown."""
     import logging
 
@@ -87,8 +88,6 @@ async def test_shutdown_suppresses_connection_error_logs(caplog):
     transport = MockTransport()
     # Mock recv to raise an exception immediately then return None (stop loop)
     # Using side_effect with an iterable
-    transport.recv = Mock(side_effect=[ConnectionError("Socket closed"), None])
-
     rpc = AsyncRPC(transport=transport)
     rpc.default_loop = asyncio.get_running_loop()
 
@@ -97,7 +96,9 @@ async def test_shutdown_suppresses_connection_error_logs(caplog):
     assert rpc._stopping is True
 
     # Run _recv_thread synchronously for a single iteration (due to side effect)
-    rpc._recv_thread()
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        monkeypatch.setattr(transport, "recv", Mock(side_effect=[ConnectionError("Socket closed"), None]))
+        rpc._recv_thread()
 
     # Verify logs
     # We expect a DEBUG log properly formatted, NOT an ERROR log
@@ -114,7 +115,7 @@ async def test_shutdown_suppresses_connection_error_logs(caplog):
 
 
 @pytest.mark.asyncio
-async def test_shutdown_cancels_run_until_stopped():
+async def test_shutdown_cancels_run_until_stopped() -> None:
     """Test that shutdown unblocks run_until_stopped."""
     rpc = AsyncRPC(transport=MockTransport())
 

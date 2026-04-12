@@ -5,6 +5,7 @@ import socket
 import sys
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any, cast
 
 import pytest
 
@@ -13,112 +14,114 @@ from pyisolate._internal.host import Extension
 from pyisolate._internal.rpc_protocol import AsyncRPC, ProxiedSingleton
 from pyisolate._internal.rpc_transports import JSONSocketTransport
 from pyisolate._internal.sandbox_detect import RestrictionModel, SandboxCapability
+from pyisolate.config import ExtensionConfig
 
 
 class DummyRPC:
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         self.run_called = False
 
-    def register_callee(self, obj, object_id):
+    def register_callee(self, obj: Any, object_id: Any) -> None:
         pass
 
-    def run(self):
+    def run(self) -> None:
         self.run_called = True
 
 
 class DummyProcess:
-    def __init__(self):
+    def __init__(self) -> None:
         self.alive = False
 
-    def start(self):
+    def start(self) -> None:
         self.alive = True
 
-    def is_alive(self):
+    def is_alive(self) -> Any:
         return self.alive
 
-    def terminate(self):
+    def terminate(self) -> None:
         self.alive = False
 
-    def join(self, timeout=None):
+    def join(self, timeout: Any = None) -> None:
         self.alive = False
 
-    def kill(self):
+    def kill(self) -> None:
         self.alive = False
 
 
 class DummyContext:
-    def __init__(self):
-        self.q = queue.Queue()
+    def __init__(self) -> None:
+        self.q: queue.Queue[Any] = queue.Queue()
 
-    def Queue(self):  # noqa: N802 - matches multiprocessing API
+    def Queue(self) -> Any:  # noqa: N802 - matches multiprocessing API
         return queue.Queue()
 
-    def Process(self, target, args):  # noqa: N802 - matches multiprocessing API
+    def Process(self, target: Any, args: Any) -> Any:  # noqa: N802 - matches multiprocessing API
         return DummyProcess()
 
 
 class DummyMP:
-    def __init__(self):
+    def __init__(self) -> None:
         self.ctx = DummyContext()
         self.executable = None
 
-    def get_context(self, mode):
+    def get_context(self, mode: Any) -> Any:
         return self.ctx
 
-    def set_executable(self, exe):
+    def set_executable(self, exe: Any) -> None:
         self.executable = exe
 
 
 class DummyExtension(Extension):
-    def __init__(self, tmp_path: Path, config_overrides=None):
-        base_config = {
+    def __init__(self, tmp_path: Path, config_overrides: Any = None) -> None:
+        base_config: dict[str, Any] = {
             "name": "demo",
+            "isolated": True,
             "dependencies": [],
             "share_torch": True,
             "share_cuda_ipc": False,
             "apis": [],
         }
         if config_overrides:
-            base_config.update(config_overrides)
+            base_config.update(cast(dict[str, Any], config_overrides))
         super().__init__(
             module_path="/tmp/mod.py",
             extension_type=SimpleNamespace,
-            config=base_config,
+            config=cast(ExtensionConfig, base_config),
             venv_root_path=str(tmp_path),
         )
         # patch multiprocessing
         self.mp = DummyMP()
 
-    def _create_extension_venv(self):
+    def _create_extension_venv(self) -> None:
         # skip actual venv creation
         return
 
-    def _install_dependencies(self):
+    def _install_dependencies(self) -> None:
         return
 
-    def __launch(self):
+    def __launch(self) -> Any:
         return DummyProcess()
 
 
 @pytest.fixture(autouse=True)
-def reset_env(monkeypatch):
+def reset_env(monkeypatch: Any) -> None:
     monkeypatch.delenv("PYISOLATE_ENABLE_CUDA_IPC", raising=False)
     monkeypatch.delenv("PYISOLATE_CHILD", raising=False)
 
 
-def test_initialize_process_requires_share_torch_for_cuda_ipc(tmp_path):
+def test_initialize_process_requires_share_torch_for_cuda_ipc(tmp_path: Any) -> None:
     ext = DummyExtension(tmp_path, {"share_torch": False, "share_cuda_ipc": True})
     with pytest.raises(RuntimeError):
         ext._initialize_process()
 
 
-def test_initialize_process_cuda_ipc_unavailable_raises(monkeypatch, tmp_path):
+def test_initialize_process_cuda_ipc_unavailable_raises(monkeypatch: Any, tmp_path: Any) -> Any:
     ext = DummyExtension(tmp_path, {"share_torch": True, "share_cuda_ipc": True})
     from pyisolate._internal import torch_utils
 
     monkeypatch.setattr(torch_utils, "probe_cuda_ipc_support", lambda: (False, "no"))
 
-    def mock_launch():
+    def mock_launch() -> Any:
         if ext.config.get("share_cuda_ipc"):
             supported, reason = torch_utils.probe_cuda_ipc_support()
             if not supported:
@@ -132,35 +135,35 @@ def test_initialize_process_cuda_ipc_unavailable_raises(monkeypatch, tmp_path):
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="AF_UNIX monkeypatch requires Linux")
-def test_initialize_process_sets_env_and_runs_rpc(monkeypatch, tmp_path):
+def test_initialize_process_sets_env_and_runs_rpc(monkeypatch: Any, tmp_path: Any) -> Any:
     ext = DummyExtension(tmp_path, {"share_torch": True, "share_cuda_ipc": False})
     monkeypatch.setattr(host, "AsyncRPC", lambda recv_queue=None, send_queue=None, transport=None: DummyRPC())
 
     class MockPopen:
-        def __init__(self, cmd, **kwargs):
+        def __init__(self, cmd: Any, **kwargs: Any) -> None:
             self.args = cmd
             self.env = kwargs.get("env", {})
             self.returncode = None
 
-        def poll(self):
+        def poll(self) -> Any:
             return None
 
-        def terminate(self):
+        def terminate(self) -> None:
             pass
 
-        def kill(self):
+        def kill(self) -> None:
             pass
 
-        def wait(self, timeout=None):
+        def wait(self, timeout: Any = None) -> Any:
             return 0
 
-        def __enter__(self):
+        def __enter__(self) -> Any:
             return self
 
-        def __exit__(self, *args):
+        def __exit__(self, *args: Any) -> None:
             pass
 
-        def communicate(self, input=None, timeout=None):
+        def communicate(self, input: Any = None, timeout: Any = None) -> Any:
             return (b"", b"")
 
     monkeypatch.setattr(host.subprocess, "Popen", MockPopen)
@@ -179,28 +182,28 @@ def test_initialize_process_sets_env_and_runs_rpc(monkeypatch, tmp_path):
     )
 
     class MockSocket:
-        def __init__(self, *args, **kwargs):
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
             pass
 
-        def bind(self, path):
+        def bind(self, path: Any) -> None:
             pass
 
-        def listen(self, backlog):
+        def listen(self, backlog: Any) -> None:
             pass
 
-        def accept(self):
+        def accept(self) -> Any:
             return (MockSocket(), "addr")
 
-        def close(self):
+        def close(self) -> None:
             pass
 
-        def sendall(self, data):
+        def sendall(self, data: Any) -> None:
             pass
 
-        def recv(self, n):
+        def recv(self, n: Any) -> Any:
             return b""
 
-        def shutdown(self, how):
+        def shutdown(self, how: Any) -> None:
             pass
 
     monkeypatch.setattr(host.socket, "socket", MockSocket)
@@ -210,16 +213,16 @@ def test_initialize_process_sets_env_and_runs_rpc(monkeypatch, tmp_path):
     monkeypatch.setattr(host.os, "chmod", lambda path, mode, **kwargs: None)
 
     class MockTransport:
-        def __init__(self, sock):
+        def __init__(self, sock: Any) -> None:
             pass
 
-        def send(self, data):
+        def send(self, data: Any) -> None:
             pass
 
-        def recv(self):
+        def recv(self) -> Any:
             return {}
 
-        def close(self):
+        def close(self) -> None:
             pass
 
     monkeypatch.setattr(host, "JSONSocketTransport", MockTransport)
@@ -243,7 +246,7 @@ def test_initialize_process_sets_env_and_runs_rpc(monkeypatch, tmp_path):
     assert ext.rpc.run_called is True
 
 
-def test_install_dependencies_no_deps_returns(monkeypatch, tmp_path):
+def test_install_dependencies_no_deps_returns(monkeypatch: Any, tmp_path: Any) -> None:
     ext = DummyExtension(tmp_path)
     # ensure python exe exists
     venv_bin = Path(ext.venv_path / "bin")
@@ -253,7 +256,7 @@ def test_install_dependencies_no_deps_returns(monkeypatch, tmp_path):
     ext._install_dependencies()
 
 
-def test_probe_cuda_ipc_support_handles_import_error(monkeypatch):
+def test_probe_cuda_ipc_support_handles_import_error(monkeypatch: Any) -> None:
     from pyisolate._internal import torch_utils
 
     monkeypatch.setattr(torch_utils.sys, "platform", "linux")
@@ -263,7 +266,7 @@ def test_probe_cuda_ipc_support_handles_import_error(monkeypatch):
     assert "torch import failed" in reason
 
 
-def test_install_dependencies_respects_lock_cache(monkeypatch, tmp_path):
+def test_install_dependencies_respects_lock_cache(monkeypatch: Any, tmp_path: Any) -> None:
     ext = DummyExtension(tmp_path)
     venv_bin = Path(ext.venv_path / "bin")
     venv_bin.mkdir(parents=True, exist_ok=True)
@@ -290,12 +293,12 @@ def test_install_dependencies_respects_lock_cache(monkeypatch, tmp_path):
     ext._install_dependencies()
 
 
-def test_callable_roundtrip_shutdown_is_clean(caplog, capsys):
+def test_callable_roundtrip_shutdown_is_clean(caplog: Any, capsys: Any) -> Any:
     class HostCallbackAPI(ProxiedSingleton):
-        async def invoke(self, handler, payload):
+        async def invoke(self, handler: Any, payload: Any) -> Any:
             return await handler(payload)
 
-    async def scenario():
+    async def scenario() -> Any:
         left, right = socket.socketpair()
         host_transport = JSONSocketTransport(left)
         child_transport = JSONSocketTransport(right)
@@ -307,7 +310,8 @@ def test_callable_roundtrip_shutdown_is_clean(caplog, capsys):
         caller = child_rpc.create_caller(HostCallbackAPI, HostCallbackAPI.get_remote_id())
 
         try:
-            def handler(payload):
+
+            def handler(payload: Any) -> Any:
                 return {"value": payload["value"] + 1}
 
             result = await asyncio.wait_for(caller.invoke(handler, {"value": 41}), timeout=5)

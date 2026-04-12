@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import importlib
 import signal
+from typing import Any
 
 
-def test_signal_cleanup_handler_tolerates_missing_sighup(monkeypatch) -> None:
+def test_signal_cleanup_handler_tolerates_missing_sighup(monkeypatch: Any) -> None:
     import pyisolate._internal.tensor_serializer as tensor_serializer
 
     monkeypatch.setenv("PYISOLATE_SIGNAL_CLEANUP", "1")
@@ -12,7 +13,7 @@ def test_signal_cleanup_handler_tolerates_missing_sighup(monkeypatch) -> None:
 
     installed: list[object] = []
 
-    def fake_signal(sig, _handler):
+    def fake_signal(sig: Any, _handler: Any) -> None:
         installed.append(sig)
 
     monkeypatch.setattr(signal, "signal", fake_signal)
