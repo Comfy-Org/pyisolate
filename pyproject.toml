@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pyisolate"
-version = "0.10.1"
+version = "0.10.2"
 description = "A Python library for dividing execution across multiple virtual environments"
 readme = "README.md"
 requires-python = ">=3.10"
