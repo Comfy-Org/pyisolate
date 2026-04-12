@@ -7,6 +7,7 @@ perform a real wheel download or a real install.
 import builtins
 import io
 import sys
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
 
@@ -44,6 +45,17 @@ def _wheel_filename(distribution: str, version: str) -> str:
 def _simple_index_html(*filenames: str) -> str:
     links = [f'<a href="{filename}">{filename}</a>' for filename in filenames]
     return "<html><body>" + "".join(links) + "</body></html>"
+
+
+def _fake_venv_python(venv_path: Path) -> Path:
+    if sys.platform == "win32":
+        python_path = venv_path / "Scripts" / "python.exe"
+    else:
+        python_path = venv_path / "bin" / "python"
+    python_path.parent.mkdir(parents=True, exist_ok=True)
+    python_path.write_text("#!/bin/sh\n")
+    python_path.chmod(0o755)
+    return python_path
 
 
 def test_resolve_cuda_wheel_requirement_to_direct_url(monkeypatch: Any) -> None:
@@ -620,11 +632,7 @@ def test_extra_index_urls_plumbed_to_install_command(tmp_path: Any, monkeypatch:
     )
 
     # Set up fake venv structure (skip create_venv — we only test install_dependencies)
-    bin_dir = venv_path / "bin"
-    bin_dir.mkdir(parents=True, exist_ok=True)
-    fake_python = bin_dir / "python"
-    fake_python.write_text("#!/bin/sh\n")
-    fake_python.chmod(0o755)
+    _fake_venv_python(venv_path)
 
     install_dependencies(venv_path, cast(ExtensionConfig, config), "test-ext")
 
@@ -640,11 +648,7 @@ def test_share_torch_cuda_wheels_install_uses_no_deps_for_resolved_urls(
     from pyisolate._internal.environment import install_dependencies
 
     venv_path = tmp_path / "venvs" / "test-ext"
-    bin_dir = venv_path / "bin"
-    bin_dir.mkdir(parents=True, exist_ok=True)
-    fake_python = bin_dir / "python"
-    fake_python.write_text("#!/bin/sh\n")
-    fake_python.chmod(0o755)
+    _fake_venv_python(venv_path)
 
     config = {
         "name": "test-ext",
@@ -714,11 +718,7 @@ def test_share_torch_named_packages_can_install_with_no_deps(tmp_path: Any, monk
     from pyisolate._internal.environment import install_dependencies
 
     venv_path = tmp_path / "venvs" / "test-ext"
-    bin_dir = venv_path / "bin"
-    bin_dir.mkdir(parents=True, exist_ok=True)
-    fake_python = bin_dir / "python"
-    fake_python.write_text("#!/bin/sh\n")
-    fake_python.chmod(0o755)
+    _fake_venv_python(venv_path)
 
     config = {
         "name": "test-ext",

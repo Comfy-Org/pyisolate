@@ -51,8 +51,8 @@ class TestCondaShareTorchRaises:
 
 
 class TestCondaCudaWheelsAllowed:
-    @patch("shutil.which", return_value="/usr/bin/pixi")
-    def test_conda_cuda_wheels_allowed(self, _mock_which: Any) -> None:
+    @patch("pyisolate._internal.pixi_provisioner.ensure_pixi", return_value="/usr/bin/pixi")
+    def test_conda_cuda_wheels_allowed(self, _mock_ensure_pixi: Any) -> None:
         """conda + cuda_wheels is valid — pixi resolves via [pypi-options]."""
         config = _make_config(
             package_manager="conda",
@@ -100,8 +100,8 @@ class TestCondaMissingPixiRaises:
 
 
 class TestCondaValidConfigPasses:
-    @patch("shutil.which", return_value="/usr/bin/pixi")
-    def test_conda_valid_config_passes(self, mock_which: Any) -> None:
+    @patch("pyisolate._internal.pixi_provisioner.ensure_pixi", return_value="/usr/bin/pixi")
+    def test_conda_valid_config_passes(self, mock_ensure_pixi: Any) -> None:
         """Valid conda config must pass validation without error."""
         config = _make_config(
             package_manager="conda",
@@ -111,8 +111,8 @@ class TestCondaValidConfigPasses:
         # Should not raise
         validate_backend_config(config)
 
-    @patch("shutil.which", return_value="/usr/bin/pixi")
-    def test_conda_with_platforms_passes(self, mock_which: Any) -> None:
+    @patch("pyisolate._internal.pixi_provisioner.ensure_pixi", return_value="/usr/bin/pixi")
+    def test_conda_with_platforms_passes(self, mock_ensure_pixi: Any) -> None:
         """Valid conda config with platforms must pass."""
         config = _make_config(
             package_manager="conda",

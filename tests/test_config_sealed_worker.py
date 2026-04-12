@@ -68,8 +68,8 @@ def test_rejects_cuda_ipc_without_share_torch(
         validate_backend_config(config)
 
 
-@patch("shutil.which", return_value="/usr/bin/pixi")
-def test_accepts_valid_mode_matrix(mock_which: Any) -> None:
+@patch("pyisolate._internal.pixi_provisioner.ensure_pixi", return_value="/usr/bin/pixi")
+def test_accepts_valid_mode_matrix(mock_ensure_pixi: Any) -> None:
     valid_configs = [
         _make_config(execution_model="host-coupled", share_torch=True, share_cuda_ipc=True),
         _make_config(execution_model="host-coupled", share_torch=True, share_cuda_ipc=False),
@@ -115,8 +115,8 @@ def test_sealed_host_ro_paths_defaults_off_and_validation() -> None:
         validate_backend_config(relative)
 
 
-@patch("shutil.which", return_value="/usr/bin/pixi")
-def test_conda_defaults_to_sealed_worker(mock_which: Any) -> None:
+@patch("pyisolate._internal.pixi_provisioner.ensure_pixi", return_value="/usr/bin/pixi")
+def test_conda_defaults_to_sealed_worker(mock_ensure_pixi: Any) -> None:
     config = _make_config(
         package_manager="conda",
         conda_channels=["conda-forge"],
