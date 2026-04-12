@@ -1,8 +1,10 @@
+from typing import Any
+
 import pytest
 
 
 @pytest.mark.asyncio
-async def test_extension_lifecycle(reference_host):
+async def test_extension_lifecycle(reference_host: Any) -> None:
     """
     Verifies:
     1. Extension can actally accept a connection.
@@ -23,7 +25,7 @@ async def test_extension_lifecycle(reference_host):
 
 
 @pytest.mark.asyncio
-async def test_non_isolated_lifecycle(reference_host):
+async def test_non_isolated_lifecycle(reference_host: Any) -> None:
     """
     Verifies standard mode (host-loaded) works with same API.
     """

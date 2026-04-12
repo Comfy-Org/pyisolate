@@ -52,13 +52,13 @@ class MockTestData:
         value: The wrapped value to serialize.
     """
 
-    def __init__(self, value: Any):
+    def __init__(self, value: Any) -> None:
         self.value = value
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, MockTestData):
             return False
-        return self.value == other.value
+        return bool(self.value == other.value)
 
     def __repr__(self) -> str:
         return f"MockTestData({self.value!r})"
@@ -83,7 +83,7 @@ class MockRegistry(ProxiedSingleton):
         obj = registry.get(obj_id)  # Returns {"key": "value"}
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self._store: dict[str, Any] = {}
         self._counter = 0
@@ -142,7 +142,7 @@ class MockHostAdapter(IsolationAdapter):
         assert config["preferred_root"] == "/tmp/myhost"
     """
 
-    def __init__(self, root_path: str = "/tmp/testhost"):
+    def __init__(self, root_path: str = "/tmp/testhost") -> None:
         self._root = root_path
         self._extensions_dir = f"{root_path}/extensions"
 
@@ -161,7 +161,7 @@ class MockHostAdapter(IsolationAdapter):
         """
         return "testhost"
 
-    def get_path_config(self, module_path: str) -> dict[str, Any] | None:
+    def get_path_config(self, module_path: str) -> dict[str, Any]:
         """Compute path configuration for an extension.
 
         This method tells pyisolate how to configure sys.path for
@@ -299,3 +299,16 @@ class MockHostAdapter(IsolationAdapter):
         Note:
             This is optional. Many adapters leave this empty.
         """
+        return None
+
+    def setup_web_directory(self, module: Any) -> None:
+        return None
+
+    def setup_child_event_hooks(self, rpc: AsyncRPC) -> None:
+        return None
+
+    def get_sandbox_system_paths(self) -> list[str]:
+        return []
+
+    def get_sandbox_gpu_patterns(self) -> list[str]:
+        return []

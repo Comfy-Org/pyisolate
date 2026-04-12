@@ -1,4 +1,5 @@
 import gc
+from typing import Any
 
 import pytest
 import torch  # noqa: E402
@@ -12,7 +13,7 @@ except ImportError:
 
 
 @pytest.mark.asyncio
-async def test_tensor_roundtrip_cpu(reference_host):
+async def test_tensor_roundtrip_cpu(reference_host: Any) -> None:
     """
     Verify sending a CPU tensor to the child and getting it back.
     """
@@ -38,7 +39,7 @@ async def test_tensor_roundtrip_cpu(reference_host):
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
 @pytest.mark.asyncio
-async def test_cuda_allocation(reference_host):
+async def test_cuda_allocation(reference_host: Any) -> None:
     """
     Verify child can allocate CUDA memory and return meta-data.
     """
@@ -62,7 +63,7 @@ async def test_cuda_allocation(reference_host):
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
 @pytest.mark.asyncio
-async def test_tensor_roundtrip_cuda(reference_host):
+async def test_tensor_roundtrip_cuda(reference_host: Any) -> None:
     """
     Verify sending a CUDA tensor. Requires CUDA IPC if isolated.
     """

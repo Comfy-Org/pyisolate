@@ -2,6 +2,7 @@ import os
 import sys
 import tempfile
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -18,7 +19,7 @@ pytestmark = pytest.mark.skipif(
 
 
 @pytest.mark.asyncio
-async def test_filesystem_barrier(reference_host):
+async def test_filesystem_barrier(reference_host: Any) -> None:
     """
     Verify that the child process cannot write to restricted paths on the host.
     """
@@ -69,7 +70,7 @@ async def test_filesystem_barrier(reference_host):
 
 
 @pytest.mark.asyncio
-async def test_module_path_ro(reference_host):
+async def test_module_path_ro(reference_host: Any) -> None:
     """Verify module path is read-only in child."""
     ext = reference_host.load_test_extension("ro_test", isolated=True)
     proxy = ext.get_proxy()
@@ -86,7 +87,7 @@ async def test_module_path_ro(reference_host):
 
 
 @pytest.mark.asyncio
-async def test_host_tmp_marker_hidden_from_child(reference_host):
+async def test_host_tmp_marker_hidden_from_child(reference_host: Any) -> None:
     """Verify host /tmp is hidden while child /tmp remains writable."""
     host_marker = Path(tempfile.mkstemp(prefix="pyisolate_host_tmp_", dir="/tmp")[1])
     child_scratch = "/tmp/child_scratch.txt"

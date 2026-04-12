@@ -1,6 +1,7 @@
 import asyncio
 import queue
 from types import SimpleNamespace
+from typing import Any, cast
 from unittest.mock import MagicMock
 
 import pytest
@@ -19,7 +20,7 @@ from pyisolate._internal.rpc_serialization import (
 )
 
 
-def test_prepare_for_rpc_nested_attr_container(monkeypatch):
+def test_prepare_for_rpc_nested_attr_container(monkeypatch: Any) -> None:
     payload = {
         "attr": AttributeContainer({"a": 1, "b": AttrDict({"c": 2})}),
         "list": [AttrDict({"d": 3})],
@@ -29,7 +30,7 @@ def test_prepare_for_rpc_nested_attr_container(monkeypatch):
     assert "attr" in converted and "list" in converted
 
 
-def test_tensor_to_cuda_attribute_container():
+def test_tensor_to_cuda_attribute_container() -> None:
     obj = {
         "__pyisolate_attribute_container__": True,
         "data": {"x": {"__pyisolate_attrdict__": True, "data": {"z": 5}}},
@@ -41,7 +42,7 @@ def test_tensor_to_cuda_attribute_container():
 
 
 @pytest.mark.asyncio
-async def test_async_rpc_stop_requires_run():
+async def test_async_rpc_stop_requires_run() -> None:
     import multiprocessing
 
     recv_q = multiprocessing.get_context("spawn").Queue()
@@ -49,10 +50,11 @@ async def test_async_rpc_stop_requires_run():
     rpc = AsyncRPC(recv_queue=recv_q, send_queue=send_q)
     rpc.run()
     await rpc.stop()
+    assert rpc.blocking_future is not None
     assert rpc.blocking_future.done() is True
 
 
-def test_async_rpc_send_thread_sets_exception_on_send_failure():
+def test_async_rpc_send_thread_sets_exception_on_send_failure() -> None:
     previous_loop = None
     loop = asyncio.new_event_loop()
     try:
@@ -62,11 +64,11 @@ def test_async_rpc_send_thread_sets_exception_on_send_failure():
     asyncio.set_event_loop(loop)
 
     class FailingQueue:
-        def put(self, _):
+        def put(self, _: Any) -> None:
             raise RuntimeError("boom")
 
-    recv_q: queue.Queue = queue.Queue()
-    rpc = AsyncRPC(recv_queue=recv_q, send_queue=FailingQueue())
+    recv_q: Any = queue.Queue()
+    rpc = AsyncRPC(recv_queue=cast(Any, recv_q), send_queue=cast(Any, FailingQueue()))
 
     pending = RPCPendingRequest(  # type: ignore[call-arg]
         kind="call",
@@ -92,7 +94,7 @@ def test_async_rpc_send_thread_sets_exception_on_send_failure():
         loop.close()
 
 
-def test_async_rpc_send_thread_callback_failure_sets_exception():
+def test_async_rpc_send_thread_callback_failure_sets_exception() -> None:
     previous_loop = None
     loop = asyncio.new_event_loop()
     try:
@@ -102,11 +104,11 @@ def test_async_rpc_send_thread_callback_failure_sets_exception():
     asyncio.set_event_loop(loop)
 
     class FailingQueue:
-        def put(self, _):
+        def put(self, _: Any) -> None:
             raise RuntimeError("kaboom")
 
-    recv_q: queue.Queue = queue.Queue()
-    rpc = AsyncRPC(recv_queue=recv_q, send_queue=FailingQueue())
+    recv_q: Any = queue.Queue()
+    rpc = AsyncRPC(recv_queue=cast(Any, recv_q), send_queue=cast(Any, FailingQueue()))
 
     pending = RPCPendingRequest(  # type: ignore[call-arg]
         kind="callback",
@@ -132,7 +134,7 @@ def test_async_rpc_send_thread_callback_failure_sets_exception():
         loop.close()
 
 
-def test_singleton_metaclass_inject_guard():
+def test_singleton_metaclass_inject_guard() -> None:
     class Demo(metaclass=SingletonMetaclass):
         pass
 
@@ -141,7 +143,7 @@ def test_singleton_metaclass_inject_guard():
         Demo.inject_instance(object())
 
 
-def test_proxied_singleton_registers_nested(monkeypatch):
+def test_proxied_singleton_registers_nested(monkeypatch: Any) -> None:
     class Nested(ProxiedSingleton):
         pass
 
@@ -149,6 +151,6 @@ def test_proxied_singleton_registers_nested(monkeypatch):
         child = Nested()
 
     rpc = SimpleNamespace(register_callee=MagicMock())
-    Parent()._register(rpc)  # instance register should register child but not self twice
+    Parent()._register(cast(Any, rpc))  # instance register should register child but not self twice
     assert rpc.register_callee.call_count == 2
     # Note: Singleton cleanup handled by conftest autouse fixture

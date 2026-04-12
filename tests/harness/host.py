@@ -3,8 +3,9 @@ import logging
 import os
 import sys
 import tempfile
+from collections.abc import AsyncGenerator
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, cast
 
 import pytest
 
@@ -19,16 +20,6 @@ from pyisolate.interfaces import SerializerRegistryProtocol
 from tests.harness.test_package import ReferenceTestExtension
 
 logger = logging.getLogger(__name__)
-
-
-class TestExtensionProtocol(Protocol):
-    async def ping(self) -> str: ...
-    async def echo_tensor(self, tensor: Any) -> Any: ...
-    async def allocate_cuda(self, size_mb: int) -> dict[str, Any]: ...
-    async def write_file(self, path: str, content: str) -> str: ...
-    async def read_file(self, path: str) -> str: ...
-    async def crash_me(self) -> None: ...
-    async def get_env_var(self, key: str) -> str | None: ...
 
 
 class ReferenceAdapter:
@@ -70,7 +61,7 @@ class ReferenceHost:
     A verbose host harness for running integration tests.
     """
 
-    def __init__(self, use_temp_dir: bool = True):
+    def __init__(self, use_temp_dir: bool = True) -> None:
         self.temp_dir: tempfile.TemporaryDirectory | None = None
         self.root_dir: Path = Path(os.getcwd())
         self._had_previous_tmpdir = "TMPDIR" in os.environ
@@ -95,13 +86,13 @@ class ReferenceHost:
         os.environ.setdefault("PYISOLATE_UV_CACHE_DIR", str(shared_uv_cache))
         os.environ.setdefault("UV_HTTP_TIMEOUT", "180")
 
-        self.extensions: list[Extension[TestExtensionProtocol]] = []
+        self.extensions: list[Extension[ReferenceTestExtension]] = []
         self._adapter_registered = False
         self.sandbox_available = True
         if sys.platform == "linux":
             self.sandbox_available = detect_sandbox_capability().available
 
-    def setup(self):
+    def setup(self) -> None:
         """Initialize the host environment."""
         # Ensure uv is in PATH
         # Since we run tests with the venv python, uv should be in the same bin dir
@@ -115,7 +106,7 @@ class ReferenceHost:
 
         # Register our reference adapter
         self.adapter = ReferenceAdapter()
-        AdapterRegistry.register(self.adapter)
+        AdapterRegistry.register(cast(Any, self.adapter))
         self._adapter_registered = True
 
         # Ensure proper torch multiprocessing setup
@@ -136,7 +127,7 @@ class ReferenceHost:
         share_torch: bool = True,
         share_cuda: bool = False,
         extra_deps: list[str] | None = None,
-    ) -> Extension[TestExtensionProtocol]:
+    ) -> Extension[ReferenceTestExtension]:
         """
         Loads the static reference extension.
         """
@@ -183,7 +174,7 @@ class ReferenceHost:
         self.extensions.append(ext)
         return ext
 
-    async def cleanup(self):
+    async def cleanup(self) -> None:
         """Stop all extensions and cleanup resources."""
         cleanup_errors = []
 
@@ -219,7 +210,7 @@ class ReferenceHost:
 
 
 @pytest.fixture
-async def reference_host():
+async def reference_host() -> AsyncGenerator[ReferenceHost, None]:
     host = ReferenceHost()
     host.setup()
     yield host

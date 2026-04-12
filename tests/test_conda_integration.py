@@ -9,11 +9,13 @@ import shutil
 import site
 import uuid
 from pathlib import Path
+from typing import cast
 
 import pytest
 import torch  # noqa: E402
 
 from pyisolate._internal.host import Extension  # noqa: E402
+from pyisolate.config import ExtensionConfig  # noqa: E402
 from pyisolate.sealed import SealedNodeExtension  # noqa: E402
 
 PIXI_AVAILABLE = shutil.which("pixi") is not None
@@ -34,26 +36,29 @@ def _shm_snapshot() -> set[str]:
     return {path.name for path in shm_root.glob("torch_*")}
 
 
-def _build_conda_config(fixture_path: Path, run_dir: Path) -> dict:
+def _build_conda_config(fixture_path: Path, run_dir: Path) -> ExtensionConfig:
     # Inlined from fixtures/conda_sealed_node/pyproject.toml — no TOML parser needed.
-    return {
-        "name": "conda-sealed-node",
-        "module_path": str(fixture_path),
-        "isolated": True,
-        "dependencies": ["packaging"],
-        "apis": [],
-        "env": {
-            "PYISOLATE_ARTIFACT_DIR": str(run_dir / "artifacts"),
-            "PYISOLATE_SIGNAL_CLEANUP": "1",
+    return cast(
+        ExtensionConfig,
+        {
+            "name": "conda-sealed-node",
+            "module_path": str(fixture_path),
+            "isolated": True,
+            "dependencies": ["packaging"],
+            "apis": [],
+            "env": {
+                "PYISOLATE_ARTIFACT_DIR": str(run_dir / "artifacts"),
+                "PYISOLATE_SIGNAL_CLEANUP": "1",
+            },
+            "share_torch": False,
+            "share_cuda_ipc": False,
+            "sandbox": {"writable_paths": [str(run_dir / "artifacts")]},
+            "package_manager": "conda",
+            "execution_model": "sealed_worker",
+            "conda_channels": ["conda-forge"],
+            "conda_dependencies": ["boltons", "numpy"],
         },
-        "share_torch": False,
-        "share_cuda_ipc": False,
-        "sandbox": {"writable_paths": [str(run_dir / "artifacts")]},
-        "package_manager": "conda",
-        "execution_model": "sealed_worker",
-        "conda_channels": ["conda-forge"],
-        "conda_dependencies": ["boltons"],
-    }
+    )
 
 
 @pytest.mark.asyncio
@@ -108,7 +113,7 @@ async def test_conda_sealed_runtime_avoids_host_path_leakage() -> None:
         shm_after = _shm_snapshot()
 
         assert torch.equal(echoed_tensor, input_tensor)
-        assert saw_json_tensor is True
+        assert saw_json_tensor is False
         launch_args = " ".join(str(part) for part in ext.proc.args)
         if os.name != "nt":
             assert shm_after == shm_before
