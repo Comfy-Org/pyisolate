@@ -112,6 +112,10 @@ class JSONSocketTransport:
         self._lock = threading.Lock()
         self._recv_lock = threading.Lock()
         self._tensor_transport = tensor_transport
+        self._rpc = None
+
+    def bind_rpc(self, rpc: Any) -> None:
+        self._rpc = rpc
 
     def set_tensor_transport_mode(self, tensor_transport: str) -> None:
         self._tensor_transport = tensor_transport
@@ -204,11 +208,16 @@ class JSONSocketTransport:
                 # Some callables (e.g. builtins) might not have signature
                 pass
 
+            callback_id = None
+            if self._rpc is not None:
+                callback_id = self._rpc.register_callback(obj)
+
             return {
                 "__pyisolate_callable__": True,
                 "type": type(obj).__name__,
                 "name": getattr(obj, "__name__", str(obj)),
                 "signature": sig_metadata,
+                "callback_id": callback_id,
             }
 
         # Handle exceptions explicitly
@@ -486,6 +495,6 @@ class JSONSocketTransport:
         if dct.get("__pyisolate_callable__"):
             from .rpc_serialization import CallableProxy
 
-            return CallableProxy(dct)
+            return CallableProxy(dct, rpc=self._rpc)
 
         return dct

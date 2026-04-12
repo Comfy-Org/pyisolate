@@ -31,7 +31,7 @@ class UVSealedRuntimeProbeNode:
         return {"required": {}}
 
     def probe(self) -> tuple[str, str, str, bool]:
-        from boltons import strutils
+        from boltons import strutils  # type: ignore[import-untyped]
 
         artifact_dir = _artifact_dir()
         path_dump = "\n".join(sys.path)
@@ -60,7 +60,7 @@ class UVSealedBoltonsSlugifyNode:
         return {"required": {"text": ("STRING",)}}
 
     def slug(self, text: str) -> tuple[str, str]:
-        from boltons import strutils
+        from boltons import strutils  # type: ignore[import-untyped]
 
         return (strutils.slugify(text, delim="_"), strutils.__file__)
 

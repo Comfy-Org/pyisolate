@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import sys
 from enum import Enum
-from typing import TYPE_CHECKING, Any, TypedDict
+from typing import TYPE_CHECKING, TypedDict
 
 if sys.version_info >= (3, 11):
     from typing import NotRequired
@@ -65,8 +65,11 @@ class ExtensionConfig(TypedDict):
     name: str
     """Unique name for the extension (used for venv directory naming)."""
 
-    module_path: str
+    module_path: NotRequired[str]
     """Filesystem path to the extension package containing ``__init__.py``."""
+
+    module: NotRequired[str]
+    """Legacy module identifier used by some sealed/conda manifests and tests."""
 
     isolated: bool
     """Whether to run the extension in an isolated venv versus the host process."""
@@ -83,14 +86,14 @@ class ExtensionConfig(TypedDict):
     share_cuda_ipc: bool
     """If True, attempt CUDA IPC-based tensor transport (Linux only, requires ``share_torch``)."""
 
-    sandbox: dict[str, Any]
+    sandbox: NotRequired[SandboxConfig]
     """Configuration for the sandbox (e.g. writable_paths, network access)."""
 
-    sandbox_mode: SandboxMode
+    sandbox_mode: NotRequired[SandboxMode]
     """Sandbox enforcement mode. Default is REQUIRED (fail if bwrap unavailable).
     Set to DISABLED only if you fully trust all code and accept the security risk."""
 
-    env: dict[str, str]
+    env: NotRequired[dict[str, str]]
     """Environment variable overrides for the child process."""
 
     package_manager: NotRequired[str]
@@ -113,3 +116,6 @@ class ExtensionConfig(TypedDict):
 
     cuda_wheels: NotRequired[CUDAWheelConfig]
     """Optional custom CUDA wheel resolution configuration for selected dependencies."""
+
+    extra_index_urls: NotRequired[list[str]]
+    """Extra PyPI index URLs passed as ``--extra-index-url`` to ``uv pip install``."""

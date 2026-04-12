@@ -6,7 +6,9 @@ Add any shared fixtures or pytest configuration here.
 
 import logging
 import sys
+from collections.abc import Generator
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -14,7 +16,7 @@ from pyisolate._internal.singleton_context import singleton_scope
 
 
 @pytest.fixture(autouse=True)
-def clean_singletons():
+def clean_singletons() -> Generator[None, None, None]:
     """Auto-cleanup fixture for singleton isolation between tests.
 
     This fixture runs automatically for all tests and ensures that:
@@ -30,7 +32,7 @@ def clean_singletons():
 
 
 @pytest.fixture
-def patch_extension_launch(monkeypatch):
+def patch_extension_launch(monkeypatch: Any) -> Any:
     """Prevent real subprocess launches during unit tests.
 
     NOTE: This fixture is NOT autouse - integration tests should NOT use it.
@@ -38,10 +40,10 @@ def patch_extension_launch(monkeypatch):
     """
     from pyisolate._internal import host as host_internal
 
-    original_launch = host_internal.Extension._Extension__launch
+    original_launch = host_internal.Extension._Extension__launch  # type: ignore[attr-defined]
     host_internal.Extension._orig_launch = original_launch  # type: ignore[attr-defined]
 
-    def dummy_launch(self):
+    def dummy_launch(self: Any) -> Any:
         return SimpleNamespace(
             is_alive=lambda: False,
             terminate=lambda: None,
@@ -54,7 +56,7 @@ def patch_extension_launch(monkeypatch):
     monkeypatch.setattr(host_internal.Extension, "_Extension__launch", original_launch)
 
 
-def pytest_configure(config):
+def pytest_configure(config: Any) -> None:
     """Configure pytest with custom settings."""
     # Register custom markers
     config.addinivalue_line("markers", "slow: marks tests as slow (>5s, deselect with -m 'not slow')")
@@ -87,7 +89,7 @@ def pytest_configure(config):
         logging.getLogger().addHandler(file_handler)
 
 
-def pytest_addoption(parser):
+def pytest_addoption(parser: Any) -> None:
     """Add custom command line options."""
     parser.addoption(
         "--debug-pyisolate",

@@ -51,17 +51,25 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  smoke-test:
-    name: Smoke Test Built Artifacts
+  verify-release-artifacts:
+    name: Verify Release Artifacts
     runs-on: ubuntu-latest
     timeout-minutes: 15
     needs: [build]
 
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+
+      - name: Install verification tooling
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install build twine
 
       - name: Download artifacts
         uses: actions/download-artifact@v4
@@ -69,11 +77,25 @@ jobs:
           name: dist-ubuntu-latest-py3.11
           path: artifacts
 
+      - name: Verify artifact presence
+        shell: bash
+        run: |
+          wheel_count="$(find artifacts -maxdepth 1 -type f -name '*.whl' | wc -l)"
+          sdist_count="$(find artifacts -maxdepth 1 -type f -name '*.tar.gz' | wc -l)"
+          if [ "$wheel_count" -eq 0 ] || [ "$sdist_count" -eq 0 ]; then
+            echo "Expected at least one wheel and one sdist before publish."
+            exit 1
+          fi
+          ls -l artifacts
+
+      - name: Validate distribution metadata
+        run: python -m twine check artifacts/*
+
       - name: Install wheel and run smoke test
         shell: bash
         run: |
-          python -m venv .venv
-          source .venv/bin/activate
+          python -m venv .wheel-venv
+          source .wheel-venv/bin/activate
           python -m pip install --upgrade pip
 
           wheel_path="$(find artifacts -type f -name '*.whl' | head -n 1)"
@@ -82,22 +104,28 @@ jobs:
             exit 1
           fi
           python -m pip install "$wheel_path"
+          python -c "import pyisolate; print(pyisolate.__version__)"
+
+      - name: Install sdist and run smoke test
+        shell: bash
+        run: |
+          python -m venv .sdist-venv
+          source .sdist-venv/bin/activate
+          python -m pip install --upgrade pip
 
           sdist_path="$(find artifacts -type f -name '*.tar.gz' | head -n 1)"
           if [ -z "$sdist_path" ]; then
             echo "No sdist artifact found."
             exit 1
           fi
-
-          temp_dir="$(mktemp -d)"
-          cd "$temp_dir"
+          python -m pip install "$sdist_path"
           python -c "import pyisolate; print(pyisolate.__version__)"
 
   publish:
     name: Publish To PyPI (Trusted Publishing)
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    needs: [build, smoke-test]
+    needs: [build, verify-release-artifacts]
     if: >-
       github.repository == 'Comfy-Org/pyisolate' &&
       github.event_name == 'release' &&

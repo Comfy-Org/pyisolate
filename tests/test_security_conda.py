@@ -6,26 +6,31 @@ import contextlib
 import os
 import re
 from pathlib import Path
+from typing import Any, cast
 from unittest.mock import MagicMock, patch
 
 from pyisolate._internal.sandbox_detect import RestrictionModel
+from pyisolate.config import ExtensionConfig
 
 
-def _make_extension():
+def _make_extension() -> Any:
     from pyisolate._internal.host import Extension
     from pyisolate.shared import ExtensionBase
 
-    config = {
-        "name": "test_conda",
-        "module": "test_module",
-        "dependencies": [],
-        "share_torch": False,
-        "share_cuda_ipc": False,
-        "package_manager": "conda",
-        "execution_model": "sealed_worker",
-        "conda_channels": ["conda-forge"],
-        "conda_dependencies": ["numpy"],
-    }
+    config = cast(
+        ExtensionConfig,
+        {
+            "name": "test_conda",
+            "module": "test_module",
+            "dependencies": [],
+            "share_torch": False,
+            "share_cuda_ipc": False,
+            "package_manager": "conda",
+            "execution_model": "sealed_worker",
+            "conda_channels": ["conda-forge"],
+            "conda_dependencies": ["numpy"],
+        },
+    )
 
     ext = Extension.__new__(Extension)
     ext.name = "test_conda"
@@ -46,7 +51,7 @@ def _pixi_python_path() -> Path:
     return Path("/fake/venv/.pixi/envs/default/bin/python")
 
 
-def _launch_extension(ext, mock_popen: MagicMock) -> MagicMock:
+def _launch_extension(ext: Any, mock_popen: MagicMock) -> MagicMock:
     mock_proc = MagicMock()
     mock_proc.pid = 12345
     mock_proc.args = [

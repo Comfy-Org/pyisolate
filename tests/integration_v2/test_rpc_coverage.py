@@ -9,13 +9,15 @@ Subordinate to issue #102 Slice 5 via issue #104.
 
 import asyncio
 import sys
+from collections.abc import Generator
+from typing import Any
 
 import pytest
 
 from tests.harness.host import ReferenceHost
 
 
-def _run(coro):
+def _run(coro: Any) -> Any:
     loop = asyncio.new_event_loop()
     try:
         return loop.run_until_complete(coro)
@@ -24,7 +26,7 @@ def _run(coro):
 
 
 @pytest.fixture
-def host():
+def host() -> Generator[ReferenceHost, None, None]:
     h = ReferenceHost()
     try:
         h.setup()
@@ -35,7 +37,7 @@ def host():
 
 @pytest.mark.skipif(sys.platform == "win32", reason="Extension loading requires Linux UDS")
 class TestTorchShareRPC:
-    def test_torch_share_singleton_roundtrip(self, host: ReferenceHost):
+    def test_torch_share_singleton_roundtrip(self, host: ReferenceHost) -> None:
         """Load a torch_share extension and verify RPC round-trip.
 
         Exercises AsyncRPC.run, _send_thread, _recv_thread, and
@@ -53,7 +55,7 @@ class TestTorchShareRPC:
 
 @pytest.mark.skipif(sys.platform == "win32", reason="Extension loading requires Linux UDS")
 class TestSealedWorkerRPC:
-    def test_sealed_worker_singleton_roundtrip(self, host: ReferenceHost):
+    def test_sealed_worker_singleton_roundtrip(self, host: ReferenceHost) -> None:
         """Load a sealed_worker extension and verify RPC round-trip.
 
         Exercises the same RPC paths as torch_share but with
@@ -83,7 +85,7 @@ class TestSealedWorkerRPC:
             env={"PYISOLATE_SIGNAL_CLEANUP": "1"},
         )
 
-        ext = Extension(
+        ext: Extension[ReferenceTestExtension] = Extension(
             module_path=package_path,
             extension_type=ReferenceTestExtension,
             config=config,
@@ -99,7 +101,7 @@ class TestSealedWorkerRPC:
 
 @pytest.mark.skipif(sys.platform != "linux", reason="bwrap requires Linux")
 class TestBwrapTorchShareRPC:
-    def test_bwrap_torch_share_roundtrip(self, host: ReferenceHost):
+    def test_bwrap_torch_share_roundtrip(self, host: ReferenceHost) -> None:
         """Load a bwrap + torch_share extension and verify RPC round-trip."""
         from pyisolate._internal.sandbox_detect import detect_sandbox_capability
 

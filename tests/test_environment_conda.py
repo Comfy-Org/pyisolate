@@ -6,6 +6,7 @@ import json
 import os
 import sys
 from pathlib import Path
+from typing import Any, cast
 from unittest.mock import patch
 
 import pytest
@@ -21,20 +22,24 @@ from pyisolate._internal.environment_conda import (
     _toml_path_string,
     create_conda_env,
 )
+from pyisolate.config import ExtensionConfig
 
 
-def _make_conda_config(**overrides: object) -> dict:
+def _make_conda_config(**overrides: object) -> ExtensionConfig:
     """Minimal valid conda config for tests."""
-    base: dict = {
+    base: ExtensionConfig = {
         "package_manager": "conda",
         "conda_channels": ["conda-forge"],
         "conda_dependencies": ["numpy"],
         "dependencies": ["requests"],
         "share_torch": False,
         "module": "test_ext",
+        "name": "test_ext",
+        "isolated": True,
+        "apis": [],
+        "share_cuda_ipc": False,
     }
-    base.update(overrides)
-    return base
+    return cast(ExtensionConfig, {**base, **overrides})
 
 
 def _pixi_python_path(env_path: Path) -> Path:
@@ -159,6 +164,46 @@ class TestGeneratePixiToml:
         toml_str = _generate_pixi_toml(config)
         assert 'version = ">=0.4.30"' in toml_str
 
+    def test_generate_pixi_toml_uses_version_pin_when_no_pyproject(self, tmp_path: Path) -> None:
+        config = _make_conda_config()
+        with patch(
+            "pyisolate._internal.environment_conda._pyisolate_source_path",
+            return_value=tmp_path,
+        ):
+            toml_str = _generate_pixi_toml(config)
+        assert 'pyisolate = "==' in toml_str
+        assert "pyisolate = { path =" not in toml_str
+
+    def test_generate_pixi_toml_uses_path_when_pyproject_exists(self, tmp_path: Path) -> None:
+        (tmp_path / "pyproject.toml").write_text("[project]\nname = 'pyisolate'\n")
+        config = _make_conda_config()
+        with patch(
+            "pyisolate._internal.environment_conda._pyisolate_source_path",
+            return_value=tmp_path,
+        ):
+            toml_str = _generate_pixi_toml(config)
+        assert "pyisolate = { path =" in toml_str
+        assert 'pyisolate = "==' not in toml_str
+
+    def test_generate_pixi_toml_pypi_fallback_produces_parseable_toml(self, tmp_path: Path) -> None:
+        try:
+            import tomllib  # type: ignore[import-not-found]
+        except ModuleNotFoundError:
+            import tomli as tomllib  # type: ignore[import-not-found]
+
+        config = _make_conda_config(dependencies=["jax[cuda12]>=0.4.30", "numpy>=2.2"])
+        with patch(
+            "pyisolate._internal.environment_conda._pyisolate_source_path",
+            return_value=tmp_path,
+        ):
+            toml_str = _generate_pixi_toml(config)
+        parsed = tomllib.loads(toml_str)
+        pyisolate_dep = parsed["pypi-dependencies"]["pyisolate"]
+        assert isinstance(pyisolate_dep, str), f"Expected string, got {type(pyisolate_dep)}: {pyisolate_dep}"
+        assert pyisolate_dep.startswith("=="), (
+            f"Expected version pin starting with '==', got: {pyisolate_dep}"
+        )
+
 
 # ── _parse_dep ──────────────────────────────────────────────────────
 
@@ -237,7 +282,13 @@ class TestParseDep:
 class TestCreateCondaEnv:
     def test_pixi_not_found_raises(self, tmp_path: Path) -> None:
         config = _make_conda_config()
-        with patch("shutil.which", return_value=None), pytest.raises(RuntimeError, match="pixi.*not found"):
+        with (
+            patch(
+                "pyisolate._internal.pixi_provisioner.ensure_pixi",
+                side_effect=RuntimeError("pixi not found"),
+            ),
+            pytest.raises(RuntimeError, match="pixi not found"),
+        ):
             create_conda_env(tmp_path / "env", config, "test_ext")
 
     def test_pixi_install_called(self, tmp_path: Path) -> None:
@@ -246,7 +297,7 @@ class TestCreateCondaEnv:
         pixi_python = _pixi_python_path(env_path)
 
         with (
-            patch("shutil.which", return_value="/usr/bin/pixi"),
+            patch("pyisolate._internal.pixi_provisioner.ensure_pixi", return_value="/usr/bin/pixi"),
             patch("subprocess.check_call") as mock_call,
             patch.object(Path, "exists", return_value=True),
         ):
@@ -266,7 +317,7 @@ class TestCreateCondaEnv:
 
         config = _make_conda_config()
         with (
-            patch("shutil.which", return_value="/usr/bin/pixi"),
+            patch("pyisolate._internal.pixi_provisioner.ensure_pixi", return_value="/usr/bin/pixi"),
             patch(
                 "subprocess.check_call",
                 side_effect=subprocess.CalledProcessError(1, "pixi"),
@@ -287,7 +338,7 @@ class TestCreateCondaEnv:
         pixi_python = _pixi_python_path(env_path)
 
         with (
-            patch("shutil.which", return_value="/usr/bin/pixi"),
+            patch("pyisolate._internal.pixi_provisioner.ensure_pixi", return_value="/usr/bin/pixi"),
             patch("subprocess.check_call") as mock_check_call,
             patch(
                 "pyisolate._internal.environment_conda._install_cuda_wheels_into_pixi"
@@ -311,7 +362,7 @@ class TestCreateCondaEnv:
         pixi_python = _pixi_python_path(env_path)
 
         with (
-            patch("shutil.which", return_value="/usr/bin/pixi"),
+            patch("pyisolate._internal.pixi_provisioner.ensure_pixi", return_value="/usr/bin/pixi"),
             patch("subprocess.check_call"),
         ):
             pixi_python.parent.mkdir(parents=True, exist_ok=True)
@@ -332,7 +383,7 @@ class TestCreateCondaEnv:
         monkeypatch.setenv("TMPDIR", str(stale_tmpdir))
 
         with (
-            patch("shutil.which", return_value="/usr/bin/pixi"),
+            patch("pyisolate._internal.pixi_provisioner.ensure_pixi", return_value="/usr/bin/pixi"),
             patch("subprocess.check_call") as mock_call,
             patch(
                 "pyisolate._internal.environment_conda._resolve_pixi_python",
@@ -374,7 +425,7 @@ class TestCreateCondaEnv:
         pixi_python.touch()
 
         with (
-            patch("shutil.which", return_value="/usr/bin/pixi"),
+            patch("pyisolate._internal.pixi_provisioner.ensure_pixi", return_value="/usr/bin/pixi"),
             patch("subprocess.check_call") as mock_call,
         ):
             create_conda_env(env_path, config, "test_ext")
@@ -414,11 +465,11 @@ class TestResolvePixiPython:
 # ── _install_cuda_wheels_into_pixi target_python threading ─────────────
 
 
-def test_install_cuda_wheels_passes_target_python(monkeypatch, tmp_path):
+def test_install_cuda_wheels_passes_target_python(monkeypatch: Any, tmp_path: Any) -> Any:
     """AC-1: conda_python='3.12.*' is parsed and passed as target_python=(3, 12)."""
     captured_kwargs: list[dict] = []
 
-    def mock_resolve(deps, config, **kwargs):
+    def mock_resolve(deps: Any, config: Any, **kwargs: Any) -> Any:
         captured_kwargs.append(kwargs)
         return deps  # return unchanged (no wheel resolution)
 
@@ -446,11 +497,11 @@ def test_install_cuda_wheels_passes_target_python(monkeypatch, tmp_path):
     assert captured_kwargs[0]["target_python"] == (3, 12)
 
 
-def test_install_cuda_wheels_wildcard_python_uses_host_tags(monkeypatch, tmp_path):
+def test_install_cuda_wheels_wildcard_python_uses_host_tags(monkeypatch: Any, tmp_path: Any) -> Any:
     """AC-2: conda_python='*' passes target_python=None (host tags fallback)."""
     captured_kwargs: list[dict] = []
 
-    def mock_resolve(deps, config, **kwargs):
+    def mock_resolve(deps: Any, config: Any, **kwargs: Any) -> Any:
         captured_kwargs.append(kwargs)
         return deps
 
@@ -478,11 +529,11 @@ def test_install_cuda_wheels_wildcard_python_uses_host_tags(monkeypatch, tmp_pat
     assert captured_kwargs[0]["target_python"] is None
 
 
-def test_install_cuda_wheels_parses_311(monkeypatch, tmp_path):
+def test_install_cuda_wheels_parses_311(monkeypatch: Any, tmp_path: Any) -> Any:
     """AC-3: conda_python='3.11.*' parses to target_python=(3, 11)."""
     captured_kwargs: list[dict] = []
 
-    def mock_resolve(deps, config, **kwargs):
+    def mock_resolve(deps: Any, config: Any, **kwargs: Any) -> Any:
         captured_kwargs.append(kwargs)
         return deps
 
@@ -514,7 +565,7 @@ def test_install_cuda_wheels_parses_311(monkeypatch, tmp_path):
 
 
 class TestResolveUvExe:
-    def test_install_cuda_wheels_uv_exe_fallback(self, monkeypatch, tmp_path):
+    def test_install_cuda_wheels_uv_exe_fallback(self, monkeypatch: Any, tmp_path: Any) -> None:
         """When python_exe.parent/uv does not exist, falls back to shutil.which."""
         # Create python_exe in a dir without uv
         python_exe = tmp_path / "no_uv_here" / "python"
@@ -528,7 +579,7 @@ class TestResolveUvExe:
         system_uv = shutil.which("uv")
         assert resolved == system_uv
 
-    def test_install_local_wheels_uv_exe_fallback(self, monkeypatch, tmp_path):
+    def test_install_local_wheels_uv_exe_fallback(self, monkeypatch: Any, tmp_path: Any) -> None:
         """_install_local_wheels uses _resolve_uv_exe and falls back correctly."""
         python_exe = tmp_path / "no_uv_here" / "python"
         python_exe.parent.mkdir(parents=True)
@@ -541,7 +592,7 @@ class TestResolveUvExe:
 
         captured_cmds: list[list[str]] = []
 
-        def mock_check_call(cmd, **kwargs):
+        def mock_check_call(cmd: Any, **kwargs: Any) -> None:
             captured_cmds.append(cmd)
 
         monkeypatch.setattr("subprocess.check_call", mock_check_call)
@@ -555,7 +606,7 @@ class TestResolveUvExe:
         system_uv = shutil.which("uv")
         assert captured_cmds[0][0] == system_uv
 
-    def test_install_cuda_wheels_uv_exe_prefers_local(self, tmp_path):
+    def test_install_cuda_wheels_uv_exe_prefers_local(self, tmp_path: Any) -> None:
         """When python_exe.parent/uv exists, it is preferred over shutil.which."""
         python_exe = tmp_path / "bin" / "python"
         python_exe.parent.mkdir(parents=True)
@@ -566,7 +617,7 @@ class TestResolveUvExe:
         resolved = _resolve_uv_exe(python_exe)
         assert resolved == str(local_uv)
 
-    def test_install_cuda_wheels_uv_exe_windows_layout(self, tmp_path):
+    def test_install_cuda_wheels_uv_exe_windows_layout(self, tmp_path: Any) -> None:
         """Windows pixi layout: python at envs/default/python.exe, no bin/ dir."""
         # Simulate Windows pixi path structure
         pixi_default = tmp_path / ".pixi" / "envs" / "default"

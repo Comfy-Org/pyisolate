@@ -186,6 +186,12 @@ async def _async_uds_entrypoint(
         raise RuntimeError(
             "share_torch=True requires PyTorch. Install 'torch' to use tensor-sharing features."
         )
+    else:
+        # Sealed worker without torch — register numpy-only TensorValue deserializer
+        from .serialization_registry import SerializerRegistry
+        from .tensor_serializer import register_sealed_tensor_deserializer
+
+        register_sealed_tensor_deserializer(SerializerRegistry.get_instance())
 
     # Instantiate extension
     extension = extension_type()

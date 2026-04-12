@@ -1,5 +1,6 @@
 import logging
 import sys
+from typing import Any
 
 import pytest
 
@@ -9,7 +10,7 @@ logging.getLogger("pyisolate").setLevel(logging.DEBUG)
 
 
 @pytest.mark.asyncio
-async def test_debug_ping(reference_host):
+async def test_debug_ping(reference_host: Any) -> None:
     print("\n--- Starting Debug Ping ---")
     ext = reference_host.load_test_extension("debug_ping", isolated=True)
 
