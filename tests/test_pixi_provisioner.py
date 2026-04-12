@@ -6,16 +6,15 @@ import hashlib
 import os
 import tarfile
 import tempfile
+from contextlib import closing
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from pyisolate._internal.pixi_provisioner import (
-    PIXI_VERSION,
-    _PLATFORM_MAP,
     _RELEASE_URL,
-    _cache_dir,
+    PIXI_VERSION,
     _get_target,
     _verify_checksum,
     ensure_pixi,
@@ -155,7 +154,7 @@ class TestEnsurePixi:
             result2 = ensure_pixi(version)
             assert result2 == str(cached_bin)
             assert fetch_mock.call_count == 0
-            print(f"HTTP_REQUESTS_ON_SECOND_CALL=0")
+            print("HTTP_REQUESTS_ON_SECOND_CALL=0")
 
     def test_corrupted_download_raises(self, tmp_path):
         """Corrupted download triggers checksum RuntimeError."""
@@ -183,16 +182,17 @@ class TestEnsurePixi:
 
         # Create a real tarball with a fake pixi binary
         fake_binary = b"#!/bin/sh\necho pixi"
-        tarball_buf = tempfile.NamedTemporaryFile(suffix=".tar.gz", delete=False)
-        with tarfile.open(tarball_buf.name, "w:gz") as tf:
+        with closing(tempfile.NamedTemporaryFile(suffix=".tar.gz", delete=False)) as tarball_buf:
+            tarball_path = Path(tarball_buf.name)
+        with tarfile.open(tarball_path, "w:gz") as tf:
             import io
             info = tarfile.TarInfo(name="pixi")
             info.size = len(fake_binary)
             info.mode = 0o755
             tf.addfile(info, io.BytesIO(fake_binary))
 
-        tarball_data = Path(tarball_buf.name).read_bytes()
-        os.unlink(tarball_buf.name)
+        tarball_data = tarball_path.read_bytes()
+        os.unlink(tarball_path)
 
         tarball_hash = hashlib.sha256(tarball_data).hexdigest()
 

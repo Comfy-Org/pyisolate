@@ -13,7 +13,7 @@ class TestSealedNdarrayTransport:
     def test_ndarray_registered_as_data_type(self):
         """After SealedNodeExtension init, ndarray is a registered data_type."""
         with singleton_scope():
-            ext = SealedNodeExtension()
+            SealedNodeExtension()
             registry = SerializerRegistry.get_instance()
             assert registry.has_handler("ndarray")
             assert registry.is_data_type("ndarray")
@@ -21,7 +21,7 @@ class TestSealedNdarrayTransport:
     def test_ndarray_serializes_as_tensor_value(self):
         """ndarray serializer produces TensorValue dict, not RemoteObjectHandle."""
         with singleton_scope():
-            ext = SealedNodeExtension()
+            SealedNodeExtension()
             registry = SerializerRegistry.get_instance()
             serializer = registry.get_serializer("ndarray")
 

@@ -1,8 +1,8 @@
-import queue
-import sys
 import asyncio
 import logging
+import queue
 import socket
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 

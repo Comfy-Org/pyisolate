@@ -569,8 +569,7 @@ def test_resolve_sageattention_host_tags_selects_cp313():
 
 def test_extra_index_urls_plumbed_to_install_command(tmp_path, monkeypatch):
     """extra_index_urls in ExtensionConfig become --extra-index-url args in uv pip install."""
-    from pathlib import Path
-    from pyisolate._internal.environment import install_dependencies, create_venv
+    from pyisolate._internal.environment import install_dependencies
 
     venv_path = tmp_path / "venvs" / "test-ext"
 

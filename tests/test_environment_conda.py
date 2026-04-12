@@ -191,8 +191,12 @@ class TestGeneratePixiToml:
             toml_str = _generate_pixi_toml(config)
         parsed = tomllib.loads(toml_str)
         pyisolate_dep = parsed["pypi-dependencies"]["pyisolate"]
-        assert isinstance(pyisolate_dep, str), f"Expected string, got {type(pyisolate_dep)}: {pyisolate_dep}"
-        assert pyisolate_dep.startswith("=="), f"Expected version pin starting with '==', got: {pyisolate_dep}"
+        assert isinstance(
+            pyisolate_dep, str
+        ), f"Expected string, got {type(pyisolate_dep)}: {pyisolate_dep}"
+        assert pyisolate_dep.startswith(
+            "=="
+        ), f"Expected version pin starting with '==', got: {pyisolate_dep}"
 
 
 # ── _parse_dep ──────────────────────────────────────────────────────

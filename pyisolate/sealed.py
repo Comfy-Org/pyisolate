@@ -63,7 +63,7 @@ class SealedNodeExtension(ExtensionBase):
         if registry.has_handler("ndarray"):
             return
 
-        _NUMPY_TO_TORCH_DTYPE = {
+        numpy_to_torch_dtype = {
             np.float32: "torch.float32",
             np.float64: "torch.float64",
             np.float16: "torch.float16",
@@ -77,8 +77,8 @@ class SealedNodeExtension(ExtensionBase):
 
         def serialize_ndarray_as_tensor_value(obj: Any) -> dict[str, Any]:
             arr = np.asarray(obj)
-            dtype_str = _NUMPY_TO_TORCH_DTYPE.get(arr.dtype.type, "torch.float32")
-            if arr.dtype.type not in _NUMPY_TO_TORCH_DTYPE:
+            dtype_str = numpy_to_torch_dtype.get(arr.dtype.type, "torch.float32")
+            if arr.dtype.type not in numpy_to_torch_dtype:
                 arr = arr.astype(np.float32)
             return {
                 "__type__": "TensorValue",

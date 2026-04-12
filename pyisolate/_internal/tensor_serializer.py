@@ -460,7 +460,7 @@ def _deserialize_json_tensor(data: dict[str, Any]) -> Any:
     # Torch unavailable — deserialize to numpy for sealed workers
     import numpy as np
 
-    _TORCH_TO_NUMPY_DTYPE = {
+    torch_to_numpy_dtype = {
         "torch.float16": np.float16,
         "torch.float32": np.float32,
         "torch.float64": np.float64,
@@ -473,7 +473,7 @@ def _deserialize_json_tensor(data: dict[str, Any]) -> Any:
         "torch.bool": np.bool_,
     }
     dtype_str = data["dtype"]
-    np_dtype = _TORCH_TO_NUMPY_DTYPE.get(dtype_str, np.float32)
+    np_dtype = torch_to_numpy_dtype.get(dtype_str, np.float32)
     arr = np.array(data["data"], dtype=np_dtype).reshape(tuple(data["tensor_size"]))
     return arr
 

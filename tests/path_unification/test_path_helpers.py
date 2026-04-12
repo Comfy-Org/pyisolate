@@ -15,7 +15,7 @@ from pyisolate.path_helpers import (
 class TestSerializeHostSnapshot:
     """Tests for host environment snapshot capture."""
 
-    def test_snapshot_contains_required_keys(self):
+    def test_snapshot_contains_required_keys(self) -> None:
         """Snapshot must include sys.path, executable, prefix, and env vars."""
         snapshot = serialize_host_snapshot()
 
@@ -29,12 +29,12 @@ class TestSerializeHostSnapshot:
         assert isinstance(snapshot["sys_prefix"], str)
         assert isinstance(snapshot["environment"], dict)
 
-    def test_snapshot_captures_sys_path(self):
+    def test_snapshot_captures_sys_path(self) -> None:
         """sys_path in snapshot should match current sys.path."""
         snapshot = serialize_host_snapshot()
         assert snapshot["sys_path"] == list(sys.path)
 
-    def test_snapshot_writes_to_file(self):
+    def test_snapshot_writes_to_file(self) -> None:
         """When output_path provided, snapshot should be written as JSON."""
         with tempfile.TemporaryDirectory() as tmpdir:
             output_path = Path(tmpdir) / "snapshot.json"
@@ -47,13 +47,13 @@ class TestSerializeHostSnapshot:
             assert loaded["sys_path"] == snapshot["sys_path"]
             assert loaded["sys_executable"] == snapshot["sys_executable"]
 
-    def test_snapshot_without_file_returns_dict(self):
+    def test_snapshot_without_file_returns_dict(self) -> None:
         """When no output_path, should return dict without side effects."""
         snapshot = serialize_host_snapshot()
         assert isinstance(snapshot, dict)
         assert len(snapshot["sys_path"]) > 0
 
-    def test_snapshot_with_extra_env_keys(self):
+    def test_snapshot_with_extra_env_keys(self) -> None:
         """Should capture additional env vars when extra_env_keys provided."""
         # Set a test env var
         os.environ["TEST_PYISOLATE_VAR"] = "test_value"
@@ -71,7 +71,7 @@ class TestSerializeHostSnapshot:
 class TestBuildChildSysPath:
     """Tests for child sys.path reconstruction logic."""
 
-    def test_preserves_host_order(self):
+    def test_preserves_host_order(self) -> None:
         """Host paths must appear in original order."""
         host = ["/host/lib1", "/host/lib2", "/host/lib3"]
         extras = ["/venv/lib"]
@@ -82,7 +82,7 @@ class TestBuildChildSysPath:
         assert result[:3] == host
         assert result[3] == extras[0]
 
-    def test_removes_duplicates(self):
+    def test_removes_duplicates(self) -> None:
         """Duplicate paths should be removed while preserving first occurrence."""
         host = ["/host/lib", "/host/lib2", "/host/lib"]
         extras = ["/venv/lib"]
@@ -93,7 +93,7 @@ class TestBuildChildSysPath:
         assert result.count("/host/lib") == 1
         assert result[0] == "/host/lib"
 
-    def test_inserts_preferred_root_first_when_missing(self):
+    def test_inserts_preferred_root_first_when_missing(self) -> None:
         """If preferred_root provided and not in host_paths, prepend it."""
         host = ["/host/lib1", "/host/lib2"]
         extras = ["/venv/lib"]
@@ -104,7 +104,7 @@ class TestBuildChildSysPath:
         assert result[0] == preferred
         assert result[1:3] == host
 
-    def test_does_not_duplicate_preferred_root_if_present(self):
+    def test_does_not_duplicate_preferred_root_if_present(self) -> None:
         """If preferred_root already in host_paths, don't duplicate it."""
         preferred = "/myapp/root"
         host = [preferred, "/host/lib1"]
@@ -115,7 +115,7 @@ class TestBuildChildSysPath:
         assert result.count(preferred) == 1
         assert result[0] == preferred
 
-    def test_filtered_subdirs_removes_named_dirs_when_provided(self):
+    def test_filtered_subdirs_removes_named_dirs_when_provided(self) -> None:
         """Subdirectories in filtered_subdirs list should be excluded from output."""
         root = "/myapp/root"
         host = [f"{root}/comfy", f"{root}/app", "/host/lib"]
@@ -128,7 +128,7 @@ class TestBuildChildSysPath:
         assert f"{root}/app" not in result
         assert "/host/lib" in result
 
-    def test_filtered_subdirs_none_preserves_all_subdirectory_paths(self):
+    def test_filtered_subdirs_none_preserves_all_subdirectory_paths(self) -> None:
         """When filtered_subdirs is None, no subdirectory filtering is applied."""
         root = "/myapp/root"
         host = [f"{root}/utils", f"{root}/app", "/host/lib"]
@@ -141,7 +141,7 @@ class TestBuildChildSysPath:
         assert f"{root}/app" in result
         assert "/host/lib" in result
 
-    def test_filtered_subdirs_does_not_filter_deep_venv_paths(self):
+    def test_filtered_subdirs_does_not_filter_deep_venv_paths(self) -> None:
         """Paths deeper than one level under preferred_root are not filtered."""
         root = "/myapp/root"
         venv_site = f"{root}/.venv/lib/python3.12/site-packages"
@@ -154,7 +154,7 @@ class TestBuildChildSysPath:
         assert venv_site in result
         assert f"{root}/comfy" not in result
 
-    def test_appends_extra_paths(self):
+    def test_appends_extra_paths(self) -> None:
         """Extra paths (isolated venv) should be appended after host paths."""
         host = ["/host/lib"]
         extras = ["/venv/lib1", "/venv/lib2"]
@@ -164,7 +164,7 @@ class TestBuildChildSysPath:
         assert result[0] == host[0]
         assert result[1:] == extras
 
-    def test_handles_empty_host_paths(self):
+    def test_handles_empty_host_paths(self) -> None:
         """Should work with empty host paths (edge case)."""
         host = []
         extras = ["/venv/lib"]
@@ -173,7 +173,7 @@ class TestBuildChildSysPath:
 
         assert result == extras
 
-    def test_handles_empty_extra_paths(self):
+    def test_handles_empty_extra_paths(self) -> None:
         """Should work with empty extra paths."""
         host = ["/host/lib"]
         extras = []
@@ -182,7 +182,7 @@ class TestBuildChildSysPath:
 
         assert result == host
 
-    def test_normalizes_paths_for_duplicate_detection(self):
+    def test_normalizes_paths_for_duplicate_detection(self) -> None:
         """Paths differing only in case/separators should be deduplicated."""
         # This test assumes case-insensitive filesystem (Windows-like)
         # On Linux it may not dedupe, which is correct behavior
@@ -195,7 +195,7 @@ class TestBuildChildSysPath:
         assert len(result) >= 1
         assert len(result) <= 2
 
-    def test_idempotent_with_repeated_extras(self):
+    def test_idempotent_with_repeated_extras(self) -> None:
         """Passing extras already in host should not duplicate."""
         host = ["/host/lib", "/venv/lib"]
         extras = ["/venv/lib"]  # Already in host
@@ -204,7 +204,7 @@ class TestBuildChildSysPath:
 
         assert result.count("/venv/lib") == 1
 
-    def test_handles_empty_string_paths(self):
+    def test_handles_empty_string_paths(self) -> None:
         """Empty string paths should be filtered out by add_path guard."""
         host = ["/host/lib", "", "/host/lib2"]
         extras = ["", "/venv/lib"]
@@ -221,7 +221,7 @@ class TestBuildChildSysPath:
 class TestIntegration:
     """Integration tests combining snapshot + path building."""
 
-    def test_round_trip_snapshot_and_rebuild(self):
+    def test_round_trip_snapshot_and_rebuild(self) -> None:
         """Capture snapshot, build child path, verify reconstruction."""
         with tempfile.TemporaryDirectory() as tmpdir:
             snapshot_path = Path(tmpdir) / "snapshot.json"

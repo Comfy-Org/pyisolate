@@ -5,11 +5,11 @@ headers without allocating multi-GB buffers. Real socketpair() used for
 roundtrip and connection-error tests.
 """
 
+import asyncio
 import contextlib
 import logging
 import socket
 import struct
-import asyncio
 from collections.abc import Iterator
 from unittest.mock import patch
 
