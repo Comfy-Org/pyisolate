@@ -441,21 +441,41 @@ def deserialize_tensor(data: dict[str, Any], mode: str = "shared_memory") -> Any
 def _deserialize_json_tensor(data: dict[str, Any]) -> Any:
     """Deserialize a JSON tensor payload.
 
-    If torch is unavailable in the receiving process, leave the JSON payload intact
-    so sealed workers can still inspect or echo it without importing torch.
+    If torch is unavailable (sealed workers), deserialize to numpy array instead.
     """
     try:
         torch, _ = require_torch("JSON tensor deserialization")
     except Exception:
-        return data
+        torch = None
 
+    if torch is not None:
+        dtype_str = data["dtype"]
+        dtype = getattr(torch, dtype_str.split(".")[-1])
+        tensor = torch.tensor(data["data"], dtype=dtype)
+        tensor = tensor.reshape(tuple(data["tensor_size"]))
+        if data.get("requires_grad"):
+            tensor.requires_grad_(True)
+        return tensor
+
+    # Torch unavailable — deserialize to numpy for sealed workers
+    import numpy as np
+
+    torch_to_numpy_dtype = {
+        "torch.float16": np.float16,
+        "torch.float32": np.float32,
+        "torch.float64": np.float64,
+        "torch.bfloat16": np.float32,  # numpy has no bfloat16; upcast
+        "torch.int8": np.int8,
+        "torch.int16": np.int16,
+        "torch.int32": np.int32,
+        "torch.int64": np.int64,
+        "torch.uint8": np.uint8,
+        "torch.bool": np.bool_,
+    }
     dtype_str = data["dtype"]
-    dtype = getattr(torch, dtype_str.split(".")[-1])
-    tensor = torch.tensor(data["data"], dtype=dtype)
-    tensor = tensor.reshape(tuple(data["tensor_size"]))
-    if data.get("requires_grad"):
-        tensor.requires_grad_(True)
-    return tensor
+    np_dtype = torch_to_numpy_dtype.get(dtype_str, np.float32)
+    arr = np.array(data["data"], dtype=np_dtype).reshape(tuple(data["tensor_size"]))
+    return arr
 
 
 def _convert_lists_to_tuples(obj: Any) -> Any:
@@ -594,3 +614,19 @@ def register_tensor_serializer(registry: Any, mode: str = "shared_memory") -> No
     registry.register("dtype", serialize_dtype, deserialize_dtype)
     registry.register("device", serialize_device, deserialize_device)
     registry.register("Size", serialize_size, deserialize_size)
+
+
+def register_sealed_tensor_deserializer(registry: Any) -> None:
+    """Register TensorValue deserializer for sealed workers (no torch required).
+
+    Sealed workers receive tensors as JSON TensorValue dicts. This registers
+    a numpy-only deserializer so the data arrives as numpy arrays, not raw dicts.
+    """
+
+    def deserializer(data: dict[str, Any]) -> Any:
+        return _deserialize_json_tensor(data)
+
+    if not registry.has_handler("TensorValue"):
+        registry.register("TensorValue", None, deserializer)
+    if not registry.has_handler("TensorRef"):
+        registry.register("TensorRef", None, deserializer)
