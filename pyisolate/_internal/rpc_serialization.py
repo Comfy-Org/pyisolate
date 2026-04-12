@@ -40,10 +40,12 @@ class CallableProxy:
     This allows inspect.signature() to work on the proxy
     """
 
-    def __init__(self, metadata: dict[str, Any]):
+    def __init__(self, metadata: dict[str, Any], rpc: Any | None = None):
         self._metadata = metadata
         self._name = metadata.get("name", "<remote_callable>")
         self._type_name = metadata.get("type", "Callable")
+        self._callback_id = metadata.get("callback_id")
+        self._rpc = rpc
 
         # Reconstruct signature if available
         sig_data = metadata.get("signature")
@@ -79,15 +81,13 @@ class CallableProxy:
 
             self.__signature__ = inspect.Signature(parameters=parameters)
 
-    def __call__(self, *args: Any, **kwargs: Any) -> Any:
-        # TODO: Implement full RPC callback support
-        # For now, we primarily need introspection to pass checks.
-        # Execution requires registering the callback ID on the sender side
-        # and handling the reverse RPC call here.
-        raise NotImplementedError(
-            f"Remote execution of {self._name} is not yet fully implemented. "
-            "Verification checks (inspect.signature) should pass."
-        )
+    async def __call__(self, *args: Any, **kwargs: Any) -> Any:
+        if self._rpc is None or not self._callback_id:
+            raise NotImplementedError(
+                f"Remote execution of {self._name} is not available: "
+                "callable proxy is missing RPC callback binding."
+            )
+        return await self._rpc.call_callback(self._callback_id, *args, **kwargs)
 
     def __repr__(self) -> str:
         return f"<CallableProxy for {self._name}>"

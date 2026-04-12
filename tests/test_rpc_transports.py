@@ -9,6 +9,7 @@ import contextlib
 import logging
 import socket
 import struct
+import asyncio
 from collections.abc import Iterator
 from unittest.mock import patch
 
@@ -72,6 +73,42 @@ class TestSendRecvRoundtrip:
         sender, _ = socket_pair
         payload = {"data": "x" * 1000}
         sender.send(payload)  # must not raise
+
+    def test_callable_roundtrip_executes_via_bound_rpc(
+        self, socket_pair: tuple[JSONSocketTransport, JSONSocketTransport]
+    ) -> None:
+        sender, receiver = socket_pair
+
+        class FakeRPC:
+            def __init__(self) -> None:
+                self.callbacks: dict[str, object] = {}
+                self.next_id = 0
+
+            def register_callback(self, func):  # type: ignore[no-untyped-def]
+                callback_id = f"cb-{self.next_id}"
+                self.next_id += 1
+                self.callbacks[callback_id] = func
+                return callback_id
+
+            async def call_callback(self, callback_id: str, *args, **kwargs):  # type: ignore[no-untyped-def]
+                func = self.callbacks[callback_id]
+                result = func(*args, **kwargs)
+                if asyncio.iscoroutine(result):
+                    return await result
+                return result
+
+        sender_rpc = FakeRPC()
+        sender.bind_rpc(sender_rpc)
+        receiver.bind_rpc(sender_rpc)
+
+        def handler(payload: dict[str, int]) -> dict[str, int]:
+            return {"value": payload["value"] + 1}
+
+        sender.send({"handler": handler})
+        result = receiver.recv()
+
+        callback_result = asyncio.run(result["handler"]({"value": 41}))
+        assert callback_result == {"value": 42}
 
 
 class TestRecvHardLimit:

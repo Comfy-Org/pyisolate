@@ -152,6 +152,9 @@ class AsyncRPC:
         # Support both legacy queue interface and new transport interface
         if transport is not None:
             self._transport = transport
+            bind_rpc = getattr(self._transport, "bind_rpc", None)
+            if callable(bind_rpc):
+                bind_rpc(self)
         elif recv_queue is not None and send_queue is not None:
             self._transport = QueueTransport(send_queue, recv_queue)
         else:

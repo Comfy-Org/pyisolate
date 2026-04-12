@@ -623,3 +623,153 @@ def test_extra_index_urls_plumbed_to_install_command(tmp_path, monkeypatch):
     assert "--extra-index-url" in captured_cmd
     idx = captured_cmd.index("--extra-index-url")
     assert captured_cmd[idx + 1] == "https://example.invalid/simple"
+
+
+def test_share_torch_cuda_wheels_install_uses_no_deps_for_resolved_urls(tmp_path, monkeypatch):
+    """Resolved CUDA wheel URLs must install in a separate --no-deps step under share_torch."""
+    from pyisolate._internal.environment import install_dependencies
+
+    venv_path = tmp_path / "venvs" / "test-ext"
+    bin_dir = venv_path / "bin"
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    fake_python = bin_dir / "python"
+    fake_python.write_text("#!/bin/sh\n")
+    fake_python.chmod(0o755)
+
+    config = {
+        "name": "test-ext",
+        "module_path": str(tmp_path),
+        "isolated": True,
+        "dependencies": ["cc-torch", "torch-generic-nms", "timm"],
+        "share_torch": True,
+        "share_cuda_ipc": False,
+        "sandbox_mode": "disabled",
+        "sandbox": {},
+        "cuda_wheels": {
+            "index_url": "https://example.invalid/cuda-wheels/",
+            "packages": ["cc-torch", "torch-generic-nms"],
+            "package_map": {},
+        },
+    }
+
+    popen_calls: list[list[str]] = []
+
+    class FakeProc:
+        def __init__(self, cmd, **kwargs):
+            popen_calls.append(cmd)
+            self.stdout = iter([])
+            self.returncode = 0
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def wait(self):
+            return 0
+
+    monkeypatch.setattr("subprocess.Popen", FakeProc)
+    monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/uv")
+    monkeypatch.setattr(
+        "pyisolate._internal.environment.exclude_satisfied_requirements",
+        lambda config, reqs, python_exe: reqs,
+    )
+    monkeypatch.setattr(
+        "pyisolate._internal.environment.get_cuda_wheel_runtime_descriptor",
+        lambda: {"torch": "2.11", "cuda": "13.0", "python_tags": ["cp313"]},
+    )
+    monkeypatch.setattr(
+        "pyisolate._internal.environment.resolve_cuda_wheel_requirements",
+        lambda requirements, config: [
+            "https://github.com/example/cuda-wheels/releases/download/cc_torch-latest/cc_torch-0.2-py3-none-any.whl",
+            "https://github.com/example/cuda-wheels/releases/download/torch_generic_nms-latest/torch_generic_nms-0.1-py3-none-any.whl",
+            "timm",
+        ],
+    )
+
+    install_dependencies(venv_path, config, "test-ext")
+
+    assert len(popen_calls) == 2
+    assert "--no-deps" not in popen_calls[0]
+    assert "timm" in popen_calls[0]
+    assert "--no-deps" in popen_calls[1]
+    assert any("cc_torch-0.2-py3-none-any.whl" in token for token in popen_calls[1])
+    assert any("torch_generic_nms-0.1-py3-none-any.whl" in token for token in popen_calls[1])
+
+
+def test_share_torch_named_packages_can_install_with_no_deps(tmp_path, monkeypatch):
+    """Named share_torch packages should install via a separate --no-deps step."""
+    from pyisolate._internal.environment import install_dependencies
+
+    venv_path = tmp_path / "venvs" / "test-ext"
+    bin_dir = venv_path / "bin"
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    fake_python = bin_dir / "python"
+    fake_python.write_text("#!/bin/sh\n")
+    fake_python.chmod(0o755)
+
+    config = {
+        "name": "test-ext",
+        "module_path": str(tmp_path),
+        "isolated": True,
+        "dependencies": ["cc-torch", "torch-generic-nms", "timm", "pyyaml"],
+        "share_torch": True,
+        "share_torch_no_deps": ["timm"],
+        "share_cuda_ipc": False,
+        "sandbox_mode": "disabled",
+        "sandbox": {},
+        "cuda_wheels": {
+            "index_url": "https://example.invalid/cuda-wheels/",
+            "packages": ["cc-torch", "torch-generic-nms"],
+            "package_map": {},
+        },
+    }
+
+    popen_calls: list[list[str]] = []
+
+    class FakeProc:
+        def __init__(self, cmd, **kwargs):
+            popen_calls.append(cmd)
+            self.stdout = iter([])
+            self.returncode = 0
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def wait(self):
+            return 0
+
+    monkeypatch.setattr("subprocess.Popen", FakeProc)
+    monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/uv")
+    monkeypatch.setattr(
+        "pyisolate._internal.environment.exclude_satisfied_requirements",
+        lambda config, reqs, python_exe: reqs,
+    )
+    monkeypatch.setattr(
+        "pyisolate._internal.environment.get_cuda_wheel_runtime_descriptor",
+        lambda: {"torch": "2.11", "cuda": "13.0", "python_tags": ["cp313"]},
+    )
+    monkeypatch.setattr(
+        "pyisolate._internal.environment.resolve_cuda_wheel_requirements",
+        lambda requirements, config: [
+            "https://github.com/example/cuda-wheels/releases/download/cc_torch-latest/cc_torch-0.2-py3-none-any.whl",
+            "https://github.com/example/cuda-wheels/releases/download/torch_generic_nms-latest/torch_generic_nms-0.1-py3-none-any.whl",
+            "timm",
+            "pyyaml",
+        ],
+    )
+
+    install_dependencies(venv_path, config, "test-ext")
+
+    assert len(popen_calls) == 3
+    assert "--no-deps" not in popen_calls[0]
+    assert "pyyaml" in popen_calls[0]
+    assert "timm" not in popen_calls[0]
+    assert "--no-deps" in popen_calls[1]
+    assert "timm" in popen_calls[1]
+    assert "--no-deps" in popen_calls[2]
+    assert any("cc_torch-0.2-py3-none-any.whl" in token for token in popen_calls[2])
