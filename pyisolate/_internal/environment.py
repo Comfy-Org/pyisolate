@@ -438,6 +438,9 @@ def install_dependencies(venv_path: Path, config: ExtensionConfig, name: str) ->
         torch_spec = f"torch=={torch_version}"
         safe_deps.insert(0, torch_spec)
 
+    for extra_url in config.get("extra_index_urls", []):
+        common_args += ["--extra-index-url", extra_url]
+
     descriptor = {
         "dependencies": safe_deps,
         "share_torch": config["share_torch"],
