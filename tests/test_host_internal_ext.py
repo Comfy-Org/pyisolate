@@ -1,5 +1,8 @@
 import queue
 import sys
+import asyncio
+import logging
+import socket
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -7,6 +10,8 @@ import pytest
 
 from pyisolate._internal import host
 from pyisolate._internal.host import Extension
+from pyisolate._internal.rpc_protocol import AsyncRPC, ProxiedSingleton
+from pyisolate._internal.rpc_transports import JSONSocketTransport
 from pyisolate._internal.sandbox_detect import RestrictionModel, SandboxCapability
 
 
@@ -283,3 +288,42 @@ def test_install_dependencies_respects_lock_cache(monkeypatch, tmp_path):
 
     # should return early without invoking pip/uv
     ext._install_dependencies()
+
+
+def test_callable_roundtrip_shutdown_is_clean(caplog, capsys):
+    class HostCallbackAPI(ProxiedSingleton):
+        async def invoke(self, handler, payload):
+            return await handler(payload)
+
+    async def scenario():
+        left, right = socket.socketpair()
+        host_transport = JSONSocketTransport(left)
+        child_transport = JSONSocketTransport(right)
+        host_rpc = AsyncRPC(transport=host_transport)
+        child_rpc = AsyncRPC(transport=child_transport)
+        HostCallbackAPI()._register(host_rpc)
+        host_rpc.run()
+        child_rpc.run()
+        caller = child_rpc.create_caller(HostCallbackAPI, HostCallbackAPI.get_remote_id())
+
+        try:
+            def handler(payload):
+                return {"value": payload["value"] + 1}
+
+            result = await asyncio.wait_for(caller.invoke(handler, {"value": 41}), timeout=5)
+            return result
+        finally:
+            child_rpc.shutdown()
+            host_rpc.shutdown()
+            await asyncio.sleep(0)
+            child_transport.close()
+            host_transport.close()
+            await asyncio.sleep(0)
+
+    with caplog.at_level(logging.ERROR):
+        result = asyncio.run(scenario())
+
+    captured = capsys.readouterr()
+    assert result == {"value": 42}
+    assert "InvalidStateError" not in captured.err
+    assert "RPC recv failed" not in caplog.text
