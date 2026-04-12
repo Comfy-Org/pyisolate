@@ -16,6 +16,7 @@ import stat
 import subprocess
 import tarfile
 import tempfile
+import zipfile
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -28,10 +29,30 @@ _PLATFORM_MAP = {
     ("Darwin", "x86_64"): "x86_64-apple-darwin",
     ("Darwin", "arm64"): "aarch64-apple-darwin",
     ("Windows", "AMD64"): "x86_64-pc-windows-msvc",
+    ("Windows", "ARM64"): "aarch64-pc-windows-msvc",
 }
 
-_RELEASE_URL = "https://github.com/prefix-dev/pixi/releases/download/v{version}/pixi-{target}.tar.gz"
-_CHECKSUM_URL = "https://github.com/prefix-dev/pixi/releases/download/v{version}/pixi-{target}.tar.gz.sha256"
+
+def _binary_name() -> str:
+    return "pixi.exe" if platform.system() == "Windows" else "pixi"
+
+
+def _archive_extension() -> str:
+    return ".zip" if platform.system() == "Windows" else ".tar.gz"
+
+
+def _release_asset_name(target: str) -> str:
+    return f"pixi-{target}{_archive_extension()}"
+
+
+def _release_url(version: str, target: str) -> str:
+    asset = _release_asset_name(target)
+    return f"https://github.com/prefix-dev/pixi/releases/download/v{version}/{asset}"
+
+
+def _checksum_url(version: str, target: str) -> str:
+    asset = _release_asset_name(target)
+    return f"https://github.com/prefix-dev/pixi/releases/download/v{version}/{asset}.sha256"
 
 
 def _get_target() -> str:
@@ -95,42 +116,57 @@ def ensure_pixi(version: str | None = None) -> str:
 
     # Check cache
     cache = _cache_dir(version)
-    cached_binary = cache / ("pixi.exe" if platform.system() == "Windows" else "pixi")
+    cached_binary = cache / _binary_name()
     if cached_binary.exists():
         return str(cached_binary)
 
     # Download
     target = _get_target()
-    tarball_url = _RELEASE_URL.format(version=version, target=target)
-    checksum_url = _CHECKSUM_URL.format(version=version, target=target)
+    archive_url = _release_url(version, target)
+    checksum_url = _checksum_url(version, target)
+    archive_extension = _archive_extension()
 
     logger.info("Downloading pixi %s for %s...", version, target)
 
     checksum_data = _fetch_url(checksum_url)
     expected_hash = checksum_data.decode().strip().split()[0]
 
-    tarball_data = _fetch_url(tarball_url)
-    _verify_checksum(tarball_data, expected_hash)
+    archive_data = _fetch_url(archive_url)
+    _verify_checksum(archive_data, expected_hash)
 
     # Extract
     cache.mkdir(parents=True, exist_ok=True)
-    with tempfile.NamedTemporaryFile(suffix=".tar.gz", delete=False) as tmp:
-        tmp.write(tarball_data)
+    with tempfile.NamedTemporaryFile(suffix=archive_extension, delete=False) as tmp:
+        tmp.write(archive_data)
         tmp_path = tmp.name
 
     try:
-        with tarfile.open(tmp_path, "r:gz") as tf:
-            members = tf.getnames()
-            binary_name = "pixi.exe" if platform.system() == "Windows" else "pixi"
-            if binary_name not in members:
-                for m in members:
-                    if m.endswith(binary_name):
-                        binary_name = m
-                        break
-            tf.extract(binary_name, path=str(cache))
-            extracted = cache / binary_name
-            if extracted != cached_binary:
-                extracted.rename(cached_binary)
+        binary_name = _binary_name()
+        if archive_extension == ".zip":
+            with zipfile.ZipFile(tmp_path) as zf:
+                members = zf.namelist()
+                member_name = binary_name
+                if member_name not in members:
+                    for member in members:
+                        if member.endswith(binary_name):
+                            member_name = member
+                            break
+                zf.extract(member_name, path=str(cache))
+                extracted = cache / member_name
+        else:
+            with tarfile.open(tmp_path, "r:gz") as tf:
+                members = tf.getnames()
+                member_name = binary_name
+                if member_name not in members:
+                    for member in members:
+                        if member.endswith(binary_name):
+                            member_name = member
+                            break
+                tf.extract(member_name, path=str(cache))
+                extracted = cache / member_name
+
+        if extracted != cached_binary:
+            extracted.rename(cached_binary)
     finally:
         os.unlink(tmp_path)
 

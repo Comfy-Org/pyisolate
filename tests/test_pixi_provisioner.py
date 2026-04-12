@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import os
+import platform
 import tarfile
 import tempfile
+import zipfile
 from contextlib import closing
 from pathlib import Path
 from typing import Any
@@ -14,9 +17,11 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from pyisolate._internal.pixi_provisioner import (
-    _RELEASE_URL,
     PIXI_VERSION,
+    _archive_extension,
+    _binary_name,
     _get_target,
+    _release_url,
     _verify_checksum,
     ensure_pixi,
 )
@@ -91,9 +96,12 @@ class TestPlatformCoverage:
     def test_url_construction(self, system: Any, machine: Any, expected_target: Any) -> None:
         """Download URL matches GitHub release asset naming convention."""
         with patch("platform.system", return_value=system), patch("platform.machine", return_value=machine):
-            target = _get_target()
-            url = _RELEASE_URL.format(version=PIXI_VERSION, target=target)
-            expected_url = f"https://github.com/prefix-dev/pixi/releases/download/v{PIXI_VERSION}/pixi-{expected_target}.tar.gz"
+            url = _release_url(PIXI_VERSION, _get_target())
+            ext = ".zip" if system == "Windows" else ".tar.gz"
+            expected_url = (
+                f"https://github.com/prefix-dev/pixi/releases/download/v{PIXI_VERSION}/"
+                f"pixi-{expected_target}{ext}"
+            )
             assert url == expected_url
             print(f"URL={url}")
 
@@ -128,7 +136,7 @@ class TestEnsurePixi:
         version = PIXI_VERSION
         cache = tmp_path / "pyisolate" / "pixi" / version
         cache.mkdir(parents=True)
-        cached_bin = cache / "pixi"
+        cached_bin = cache / _binary_name()
         cached_bin.write_bytes(b"cached binary")
 
         with (
@@ -143,7 +151,7 @@ class TestEnsurePixi:
         version = PIXI_VERSION
         cache = tmp_path / "pyisolate" / "pixi" / version
         cache.mkdir(parents=True)
-        cached_bin = cache / "pixi"
+        cached_bin = cache / _binary_name()
         cached_bin.write_bytes(b"cached binary")
 
         fetch_mock = MagicMock()
@@ -170,6 +178,7 @@ class TestEnsurePixi:
         cache = tmp_path / "pyisolate" / "pixi" / version
 
         # Simulate: no pixi on PATH, no cache, download gives bad data
+        archive_name = f"pixi{_archive_extension()}"
         with (
             patch("shutil.which", return_value=None),
             patch("pyisolate._internal.pixi_provisioner._cache_dir", return_value=cache),
@@ -178,7 +187,7 @@ class TestEnsurePixi:
             # First call returns checksum, second returns tarball with wrong content
             good_hash = hashlib.sha256(b"good data").hexdigest()
             fetch_mock.side_effect = [
-                f"{good_hash}  pixi.tar.gz".encode(),  # checksum file
+                f"{good_hash}  {archive_name}".encode(),  # checksum file
                 b"corrupted tarball data",  # tarball (wrong content)
             ]
 
@@ -190,22 +199,27 @@ class TestEnsurePixi:
         version = PIXI_VERSION
         cache = tmp_path / "pyisolate" / "pixi" / version
 
-        # Create a real tarball with a fake pixi binary
+        # Create a real archive with a fake pixi binary.
         fake_binary = b"#!/bin/sh\necho pixi"
-        with closing(tempfile.NamedTemporaryFile(suffix=".tar.gz", delete=False)) as tarball_buf:
-            tarball_path = Path(tarball_buf.name)
-        with tarfile.open(tarball_path, "w:gz") as tf:
-            import io
+        binary_name = _binary_name()
+        archive_extension = _archive_extension()
+        with closing(tempfile.NamedTemporaryFile(suffix=archive_extension, delete=False)) as archive_buf:
+            archive_path = Path(archive_buf.name)
+        if platform.system() == "Windows":
+            with zipfile.ZipFile(archive_path, "w") as zf:
+                zf.writestr(binary_name, fake_binary)
+        else:
+            with tarfile.open(archive_path, "w:gz") as tf:
+                info = tarfile.TarInfo(name=binary_name)
+                info.size = len(fake_binary)
+                info.mode = 0o755
+                tf.addfile(info, io.BytesIO(fake_binary))
 
-            info = tarfile.TarInfo(name="pixi")
-            info.size = len(fake_binary)
-            info.mode = 0o755
-            tf.addfile(info, io.BytesIO(fake_binary))
+        archive_data = archive_path.read_bytes()
+        os.unlink(archive_path)
 
-        tarball_data = tarball_path.read_bytes()
-        os.unlink(tarball_path)
-
-        tarball_hash = hashlib.sha256(tarball_data).hexdigest()
+        archive_hash = hashlib.sha256(archive_data).hexdigest()
+        archive_name = f"pixi{archive_extension}"
 
         with (
             patch("shutil.which", return_value=None),
@@ -213,8 +227,8 @@ class TestEnsurePixi:
             patch("pyisolate._internal.pixi_provisioner._fetch_url") as fetch_mock,
         ):
             fetch_mock.side_effect = [
-                f"{tarball_hash}  pixi.tar.gz".encode(),
-                tarball_data,
+                f"{archive_hash}  {archive_name}".encode(),
+                archive_data,
             ]
             result = ensure_pixi(version)
             assert Path(result).exists()
