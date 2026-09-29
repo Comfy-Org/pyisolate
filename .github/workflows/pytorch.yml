@@ -18,7 +18,7 @@ jobs:
         pytorch-version: ['2.0.0', '2.1.0', '2.2.0', '2.3.0']
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
 
     - name: Set up Python ${{ matrix.python-version }}
       uses: actions/setup-python@v5
@@ -64,7 +64,7 @@ jobs:
             cuda-version: '12.1'
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
 
     - name: Set up Python
       uses: actions/setup-python@v5
