@@ -4,7 +4,7 @@ Guidance for AI agents maintaining the pyisolate codebase.
 
 ## Identity
 
-**pyisolate** is a Python library (PyPI: `pyisolate`, v0.10.1) for running extensions in isolated virtual environments with seamless inter-process communication. It provides dependency isolation, zero-copy tensor transfer, and bubblewrap sandboxing for GPU-heavy workloads.
+**pyisolate** is a Python library (PyPI: `pyisolate`; source version 0.10.2 per `pyproject.toml`) for running extensions in isolated virtual environments with seamless inter-process communication. It provides dependency isolation, zero-copy tensor transfer, and bubblewrap sandboxing for GPU-heavy workloads.
 
 License: MIT | Python: >=3.10
 
@@ -14,7 +14,7 @@ License: MIT | Python: >=3.10
 
 | File | Purpose |
 |------|---------|
-| `__init__.py` | Package exports: `ExtensionBase`, `ExtensionManager`, `ExtensionConfig`, `SandboxMode`, `ProxiedSingleton`, `SealedNodeExtension`, adapter registration |
+| `__init__.py` | Key exports (full list under Public API Surface): `ExtensionBase`, `ExtensionManager`, `ExtensionConfig`, `SandboxMode`, `ProxiedSingleton`, `SealedNodeExtension`, adapter registration |
 | `host.py` | `ExtensionManager` — creates/manages isolated extensions and their venvs |
 | `shared.py` | `ExtensionBase` / `ExtensionLocal` — base classes with lifecycle hooks (`before_module_loaded`, `on_module_loaded`) |
 | `sealed.py` | `SealedNodeExtension` — minimal extension for sealed workers (no host framework imports) |
@@ -65,8 +65,9 @@ pytest tests/test_rpc_contract.py -v      # specific test file
 pytest -k "test_sandbox" -v               # pattern match
 
 # Code quality
-ruff check pyisolate tests
-ruff format pyisolate tests
+ruff check pyisolate tests                # lint (same scope as CI)
+ruff format --check pyisolate tests       # format check (same scope as CI)
+ruff format pyisolate tests               # apply formatting
 
 # Build
 python -m build
