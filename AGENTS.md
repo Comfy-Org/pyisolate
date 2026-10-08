@@ -64,7 +64,8 @@ pytest                                    # all tests with coverage
 pytest tests/test_rpc_contract.py -v      # specific test file
 pytest -k "test_sandbox" -v               # pattern match
 
-# Code quality
+# Code quality (`tox -e lint` runs `ruff check .` / `ruff format --check .`, a broader
+# scope that also covers example/, docs/ and README.md and is not clean today)
 ruff check pyisolate tests                # lint (same scope as CI)
 ruff format --check pyisolate tests       # format check (same scope as CI)
 ruff format pyisolate tests               # apply formatting
